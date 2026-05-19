@@ -18,4 +18,12 @@ RUN python3 -m pip install --no-cache-dir -r /tmp/requirements-docker.txt
 
 COPY . /workspace
 WORKDIR /workspace
+
+# ACR build context often omits submodule contents; fetch Marigold if missing.
+RUN test -f third_party/Marigold/marigold/__init__.py || ( \
+      rm -rf third_party/Marigold && \
+      mkdir -p third_party && \
+      git clone --depth 1 https://github.com/prs-eth/marigold.git third_party/Marigold \
+    )
+
 ENV PYTHONPATH=/workspace:/workspace/third_party/Marigold

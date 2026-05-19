@@ -1,6 +1,6 @@
 # Installed in ACR image build (see Dockerfile). Matches environment.yml.
 diffusers>=0.28.0,<0.30.0
-transformers>=4.40
+transformers>=4.40,<4.46
 accelerate>=0.30
 einops
 h5py

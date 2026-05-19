@@ -4,6 +4,7 @@ build:
   network: host
 
 run:
+  setup: "git submodule update --init --recursive"
   shm_size: "32g"
   volumes:
     - /isilon:/isilon:ro
