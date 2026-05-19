@@ -1,0 +1,14 @@
+layer,relative_l2_delta
+conv_in,2.460814e-01
+conv_norm_out,5.760682e-03
+conv_out,3.663293e-02
+down_blocks.0,3.771826e-02
+down_blocks.1,2.210283e-02
+down_blocks.2,2.043353e-02
+down_blocks.3,3.746224e-02
+mid_block,3.630500e-02
+time_embedding,2.859065e-01
+up_blocks.0,5.571664e-02
+up_blocks.1,2.102226e-02
+up_blocks.2,2.340722e-02
+up_blocks.3,4.047584e-02

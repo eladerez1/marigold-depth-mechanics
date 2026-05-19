@@ -1,0 +1,57 @@
+{
+  "sample_id": "nyu_0000",
+  "hook_layer": "mid_block.resnets.1",
+  "n_steps": 10,
+  "steps": [
+    {
+      "step_idx": 0,
+      "timestep": 999,
+      "dir": "step_00"
+    },
+    {
+      "step_idx": 1,
+      "timestep": 899,
+      "dir": "step_01"
+    },
+    {
+      "step_idx": 2,
+      "timestep": 799,
+      "dir": "step_02"
+    },
+    {
+      "step_idx": 3,
+      "timestep": 699,
+      "dir": "step_03"
+    },
+    {
+      "step_idx": 4,
+      "timestep": 599,
+      "dir": "step_04"
+    },
+    {
+      "step_idx": 5,
+      "timestep": 499,
+      "dir": "step_05"
+    },
+    {
+      "step_idx": 6,
+      "timestep": 399,
+      "dir": "step_06"
+    },
+    {
+      "step_idx": 7,
+      "timestep": 299,
+      "dir": "step_07"
+    },
+    {
+      "step_idx": 8,
+      "timestep": 199,
+      "dir": "step_08"
+    },
+    {
+      "step_idx": 9,
+      "timestep": 99,
+      "dir": "step_09"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "stage": "complete",
+  "device": "cuda:0",
+  "max_images": 200,
+  "n_steps": 10,
+  "models": [
+    "B",
+    "D",
+    "A"
+  ]
+}

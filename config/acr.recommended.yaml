@@ -1,0 +1,15 @@
+# Merge into ~/.config/acr/config.yaml after `acr init`.
+# Paths use elad.e — change if your DGX username differs.
+
+server: http://10.1.1.136:8000
+
+clearml_conf: /isilon/Automotive/RnD/elad.e/.credentials/clearml.conf
+
+mounts:
+  - /isilon:/isilon
+  - /raid/homes/elad.e:/raid/homes/elad.e
+
+# Set in shell before ./scripts/acr_submit.sh:
+#   export MARIGOLD_ACR_REPO=git@github.com:UVeye/<repo>.git
+#   export MARIGOLD_ACR_BRANCH=main
+env: {}

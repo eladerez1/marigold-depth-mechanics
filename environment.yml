@@ -1,0 +1,27 @@
+name: marigold-internals
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch=2.3
+  - torchvision
+  - pip:
+    - diffusers>=0.28.0
+    - transformers>=4.40
+    - accelerate>=0.30
+    - wandb
+    - einops
+    - h5py
+    - matplotlib
+    - seaborn
+    - scikit-learn
+    - tqdm
+    - rich
+    - omegaconf
+    - datasets
+    - huggingface_hub
+    - safetensors
+    - opencv-python-headless
+    - pillow

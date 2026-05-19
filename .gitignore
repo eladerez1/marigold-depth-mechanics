@@ -1,0 +1,15 @@
+.acr_site_packages/
+.acr_venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+results/archive/
+results/**/*.npz
+results/**/*.h5
+results/**/cache/
+checkpoints/model_*/
+stable-diffusion-2.tar
+*.tar
+data/raw/
+*.log

@@ -1,0 +1,17 @@
+# Pip deps for ACR container fallback (PyTorch comes from nvcr.io/nvidia/pytorch image).
+diffusers>=0.28.0,<0.30.0
+transformers>=4.40
+accelerate>=0.30
+einops
+h5py
+matplotlib
+seaborn
+scikit-learn
+tqdm
+rich
+omegaconf
+datasets
+huggingface_hub
+safetensors
+opencv-python-headless
+pillow

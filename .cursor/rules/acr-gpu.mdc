@@ -1,0 +1,38 @@
+---
+description: All DGX GPU jobs for marigold_depth_mechanics must use ACR
+globs:
+  - "**/*"
+---
+
+# GPU jobs: use ACR only
+
+For `marigold_depth_mechanics`, **never use dgx04** for GPU jobs (ACR or manual ssh).
+
+**Never `dgx04`.** Submit via git repo (`--repo`); scheduler picks node/GPU by default.
+
+## Required workflow
+
+1. User must have run `./scripts/acr_install.sh` and `acr init` (see `docs/ACR.md`).
+2. Code pushed to GitHub; `MARIGOLD_ACR_REPO` set.
+3. Submit with `./scripts/acr_submit.sh`:
+   - `probing` — spatial probes (`run_gpu_pipeline.py --probing-only`)
+   - `full` — download + exp01 + probing
+   - `export_denoise` — PCA trajectory export
+3. Monitor: `acr jobs`, `acr logs <id> -f`, dashboard http://10.1.1.136:8082
+
+## Examples
+
+```bash
+./scripts/acr_submit.sh probing --max-images 200 --models B,D,A --gpus 1
+./scripts/acr_submit.sh status
+```
+
+## Permission
+
+The user approves **queuing GPU work via ACR without asking each time**. Use `./scripts/acr_submit.sh` proactively for the next logical experiment step.
+
+Still **do not** use `ssh` + `nohup` on DGX unless ACR is down.
+
+For very large runs (e.g. multi-day Model C training), a brief heads-up in chat is fine but not required before `acr run`.
+
+Check `acr quota` if many jobs are queued. **Never submit without `--repo`.** **Never `dgx04`.**

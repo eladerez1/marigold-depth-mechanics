@@ -1,0 +1,22 @@
+# Transitive deps for requirements.txt (--no-deps install). Do NOT list torch/numpy/torchvision/pandas.
+regex
+requests
+filelock
+pyyaml
+importlib-metadata
+packaging
+fsspec
+httpx
+hf-xet
+tokenizers
+protobuf
+aiohttp
+attrs
+multidict
+yarl
+frozenlist
+aiosignal
+async-timeout
+pyarrow
+dill
+xxhash
