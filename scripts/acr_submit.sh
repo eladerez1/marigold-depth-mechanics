@@ -106,7 +106,7 @@ if [[ -z "${ACR_REPO}" ]]; then
   exit 1
 fi
 
-REMOTE_CMD="bash scripts/acr/job_inner.sh"
+REMOTE_CMD="bash /workspace/scripts/acr/job_inner.sh"
 
 if [[ -n "${NODE}" ]]; then
   echo "Submitting ACR job: ${JOB} on ${NODE} (${GPUS} GPU) repo=${ACR_REPO}@${ACR_BRANCH}"

@@ -17,4 +17,5 @@ COPY scripts/acr/requirements-docker.txt /tmp/requirements-docker.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements-docker.txt
 
 COPY . /workspace
+WORKDIR /workspace
 ENV PYTHONPATH=/workspace:/workspace/third_party/Marigold
