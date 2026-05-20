@@ -36,7 +36,7 @@ EXTRA_ACR_ARGS=()
 usage() {
   sed -n '2,14p' "$0"
   echo ""
-  echo "Usage: $0 <probing|full|export_denoise|train_model_c|status|jobs|logs> [options]"
+  echo "Usage: $0 <probing|full|export_denoise|train_model_c|finish|status|jobs|logs> [options]"
   echo "  Requires: MARIGOLD_ACR_REPO=git@github.com:UVeye/<repo>.git"
   echo "  --branch BRANCH   default: main (or set MARIGOLD_ACR_BRANCH)"
   echo "  --node NODE       optional pin (never dgx04)"
@@ -96,7 +96,7 @@ case "${JOB_CMD}" in
     [[ -n "${JOB_ID:-}" ]] || { echo "Pass --job-id"; exit 1; }
     exec acr logs "${JOB_ID}" -f
     ;;
-  probing|full|export_denoise|train_model_c)
+  probing|full|export_denoise|train_model_c|finish)
     JOB="${JOB_CMD}"
     ;;
   *)
@@ -120,7 +120,7 @@ else
   echo "Submitting ACR job: ${JOB} — scheduler picks node (${GPUS} GPU) repo=${ACR_REPO}@${ACR_BRANCH}"
 fi
 echo "  max_images=${MAX_IMAGES} models=${MODELS} denoise_steps=${DENOISE_STEPS}"
-[[ "${JOB}" == "train_model_c" ]] && echo "  train_data=${TRAIN_DATA} steps=${TRAIN_STEPS}"
+[[ "${JOB}" == "train_model_c" || "${JOB}" == "finish" ]] && echo "  train_data=${TRAIN_DATA} steps=${TRAIN_STEPS}"
 [[ -n "${GPU_TYPE}" ]] && echo "  gpu_type=${GPU_TYPE}"
 
 ACR_ARGS=(

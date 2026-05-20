@@ -5,7 +5,7 @@ set -euo pipefail
 PROJ="${MARIGOLD_PROJ:-/workspace}"
 ISILON_ROOT="${MARIGOLD_ISILON_ROOT:-/isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics}"
 export HF_HOME="${HF_HOME:-/isilon/Automotive/RnD/elad.e/.cache/huggingface}"
-export PYTHONPATH="${PROJ}:${PROJ}/third_party/Marigold:${PYTHONPATH:-}"
+export PYTHONPATH="${PROJ}/third_party/Marigold:${PROJ}:${PYTHONPATH:-}"
 
 cd "${PROJ}"
 
@@ -87,8 +87,36 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  finish)
+    LOG="${LOG_DIR}/finish_acr.log"
+    {
+      echo "=== train Model C ==="
+      EXTRA_ARGS=(--no_wandb)
+      if [[ -n "${MARIGOLD_BASE_DATA_DIR:-}" ]]; then
+        EXTRA_ARGS+=(--data_root "${MARIGOLD_BASE_DATA_DIR}")
+      fi
+      _run_python src/models/train_single_step.py \
+        --output_dir "${PROJ}/checkpoints/model_C" \
+        --train_data "${TRAIN_DATA:-nyu}" \
+        --steps "${TRAIN_STEPS:-30000}" \
+        --batch_size 2 \
+        --grad_accum 4 \
+        "${EXTRA_ARGS[@]}"
+
+      echo "=== probe Model C (append to exp02/03) ==="
+      _run_python scripts/run_gpu_pipeline.py \
+        --gpu 0 \
+        --max_images "${MAX_IMAGES:-1000}" \
+        --denoise_steps "${DENOISE_STEPS:-10}" \
+        --models "C" \
+        --skip-download \
+        --probing-only \
+        --append
+    } 2>&1 | tee "${LOG}"
+    ;;
+
   *)
-    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c)" >&2
+    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c | finish)" >&2
     exit 1
     ;;
 esac

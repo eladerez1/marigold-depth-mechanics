@@ -240,7 +240,50 @@ def _probe_marigold_streaming(
     return exp02_rows, exp03_rows
 
 
-def run_probing(device: str, max_images: int, n_steps: int, models: str = "B,D,A") -> None:
+def _load_existing_probe_rows(
+    csv_path: Path, skip_models: set[str]
+) -> tuple[list, list]:
+    if not csv_path.exists():
+        return [], []
+    rows02, rows03 = [], []
+    with csv_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("model") in skip_models:
+                continue
+            rows02.append(
+                [
+                    row["model"],
+                    row["layer"],
+                    row["task"],
+                    row["metric_value"],
+                    row.get("best_timestep", ""),
+                ]
+            )
+    ts_path = csv_path.parent.parent / "exp03" / "timestep_curves.csv"
+    if ts_path.exists():
+        with ts_path.open(newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("model") in skip_models:
+                    continue
+                rows03.append(
+                    [
+                        row["model"],
+                        row["timestep"],
+                        row["task"],
+                        row["metric_value"],
+                        row.get("best_layer", ""),
+                    ]
+                )
+    return rows02, rows03
+
+
+def run_probing(
+    device: str,
+    max_images: int,
+    n_steps: int,
+    models: str = "B,D,A",
+    append: bool = False,
+) -> None:
     from diffusers import UNet2DConditionModel
 
     from src.extraction.sd2_probing_forward import extract_sd2_one_layer
@@ -264,8 +307,14 @@ def run_probing(device: str, max_images: int, n_steps: int, models: str = "B,D,A
     print(f"Probing {n_images} images, {len(target_layers)} layers, models={model_list}", flush=True)
 
     all_feats: dict[str, dict] = {}
-    exp02_rows: list = []
-    exp03_rows: list = []
+    out02 = ROOT / "results" / "exp02"
+    out03 = ROOT / "results" / "exp03"
+    skip = set(model_list) if append else set()
+    exp02_rows, exp03_rows = (
+        _load_existing_probe_rows(out02 / "probing_matrix.csv", skip)
+        if append
+        else ([], [])
+    )
 
     for mid in model_list:
         if mid in ("B", "D"):
@@ -318,7 +367,6 @@ def run_probing(device: str, max_images: int, n_steps: int, models: str = "B,D,A
             exp03_rows.extend(rows3)
             all_feats["C"] = {}
 
-    out02, out03 = ROOT / "results" / "exp02", ROOT / "results" / "exp03"
     out02.mkdir(parents=True, exist_ok=True)
     out03.mkdir(parents=True, exist_ok=True)
 
@@ -381,6 +429,11 @@ def main() -> None:
         dest="probing_only",
         help="Skip model download and Exp01; only extract features and train probes.",
     )
+    p.add_argument(
+        "--append",
+        action="store_true",
+        help="Keep existing probe rows for models not in --models.",
+    )
     args = p.parse_args()
 
     device = f"cuda:{args.gpu}"
@@ -393,7 +446,13 @@ def main() -> None:
         download_models()
     if not args.probing_only:
         run_exp01()
-    run_probing(device, args.max_images, args.denoise_steps, models=args.models)
+    run_probing(
+        device,
+        args.max_images,
+        args.denoise_steps,
+        models=args.models,
+        append=args.append,
+    )
     set_status("complete", device=device, max_images=args.max_images)
 
 
