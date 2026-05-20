@@ -29,12 +29,14 @@ MODELS="B,D,A"
 DENOISE_STEPS=10
 NYU_INDEX=0
 NUM_SAMPLES=5
+TRAIN_DATA="${MARIGOLD_TRAIN_DATA:-nyu}"
+TRAIN_STEPS=30000
 EXTRA_ACR_ARGS=()
 
 usage() {
   sed -n '2,14p' "$0"
   echo ""
-  echo "Usage: $0 <probing|full|export_denoise|status|jobs|logs> [options]"
+  echo "Usage: $0 <probing|full|export_denoise|train_model_c|status|jobs|logs> [options]"
   echo "  Requires: MARIGOLD_ACR_REPO=git@github.com:UVeye/<repo>.git"
   echo "  --branch BRANCH   default: main (or set MARIGOLD_ACR_BRANCH)"
   echo "  --node NODE       optional pin (never dgx04)"
@@ -45,6 +47,8 @@ usage() {
   echo "  --denoise-steps N"
   echo "  --num-samples N   export_denoise"
   echo "  --nyu-index N     export_denoise"
+  echo "  --train-data STR  train_model_c: nyu | hypersim,vkitti"
+  echo "  --steps N         train_model_c optimization steps"
   echo "  --job-id ID       for logs (acr logs -f)"
   exit 1
 }
@@ -66,6 +70,8 @@ while [[ $# -gt 0 ]]; do
     --denoise-steps) DENOISE_STEPS="$2"; shift 2 ;;
     --num-samples) NUM_SAMPLES="$2"; shift 2 ;;
     --nyu-index) NYU_INDEX="$2"; shift 2 ;;
+    --train-data) TRAIN_DATA="$2"; shift 2 ;;
+    --steps) TRAIN_STEPS="$2"; shift 2 ;;
     --job-id) JOB_ID="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) EXTRA_ACR_ARGS+=("$1"); shift ;;
@@ -90,7 +96,7 @@ case "${JOB_CMD}" in
     [[ -n "${JOB_ID:-}" ]] || { echo "Pass --job-id"; exit 1; }
     exec acr logs "${JOB_ID}" -f
     ;;
-  probing|full|export_denoise)
+  probing|full|export_denoise|train_model_c)
     JOB="${JOB_CMD}"
     ;;
   *)
@@ -114,6 +120,7 @@ else
   echo "Submitting ACR job: ${JOB} — scheduler picks node (${GPUS} GPU) repo=${ACR_REPO}@${ACR_BRANCH}"
 fi
 echo "  max_images=${MAX_IMAGES} models=${MODELS} denoise_steps=${DENOISE_STEPS}"
+[[ "${JOB}" == "train_model_c" ]] && echo "  train_data=${TRAIN_DATA} steps=${TRAIN_STEPS}"
 [[ -n "${GPU_TYPE}" ]] && echo "  gpu_type=${GPU_TYPE}"
 
 ACR_ARGS=(
@@ -131,6 +138,8 @@ ACR_ARGS=(
   -e "DENOISE_STEPS=${DENOISE_STEPS}"
   -e "NYU_INDEX=${NYU_INDEX}"
   -e "NUM_SAMPLES=${NUM_SAMPLES}"
+  -e "TRAIN_DATA=${TRAIN_DATA}"
+  -e "TRAIN_STEPS=${TRAIN_STEPS}"
 )
 
 [[ -n "${NODE}" ]] && ACR_ARGS+=(--node "${NODE}")

@@ -1,0 +1,32 @@
+# Model C: single-step depth regression (Hypersim + VKitti when MARIGOLD_BASE_DATA_DIR is set).
+depth_normalization:
+  type: scale_shift_depth
+  clip: true
+  norm_min: -1.0
+  norm_max: 1.0
+  min_max_quantile: 0.02
+
+augmentation:
+  lr_flip_p: 0.5
+
+dataset:
+  train:
+    name: mixed
+    prob_ls: [0.7, 0.3]
+    dataset_list:
+      - name: hypersim_depth
+        disp_name: hypersim_depth_train
+        dir: hypersim/hypersim_processed_train.tar
+        filenames: data_split/hypersim_depth/filename_list_train_filtered.txt
+        resize_to_hw: [480, 640]
+      - name: vkitti_depth
+        disp_name: vkitti_depth_train
+        dir: vkitti/vkitti.tar
+        filenames: data_split/vkitti_depth/vkitti_train.txt
+        kitti_bm_crop: true
+        valid_mask_crop: null
+        resize_to_hw: [480, 640]
+
+dataloader:
+  max_train_batch_size: 2
+  seed: 42

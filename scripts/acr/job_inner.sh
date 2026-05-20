@@ -71,8 +71,24 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  train_model_c)
+    LOG="${LOG_DIR}/train_model_c_acr.log"
+    EXTRA_ARGS=(--no_wandb)
+    if [[ -n "${MARIGOLD_BASE_DATA_DIR:-}" ]]; then
+      EXTRA_ARGS+=(--data_root "${MARIGOLD_BASE_DATA_DIR}")
+    fi
+    _run_python src/models/train_single_step.py \
+      --output_dir "${PROJ}/checkpoints/model_C" \
+      --train_data "${TRAIN_DATA:-nyu}" \
+      --steps "${TRAIN_STEPS:-30000}" \
+      --batch_size 2 \
+      --grad_accum 4 \
+      "${EXTRA_ARGS[@]}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
   *)
-    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise)" >&2
+    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c)" >&2
     exit 1
     ;;
 esac
