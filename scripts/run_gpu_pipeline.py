@@ -159,36 +159,10 @@ def load_depth_tensor(path: Path, size: int = 64) -> torch.Tensor:
     return t.squeeze()  # [H,W]
 
 
-def _checkpoint_usable(ckpt: Path) -> bool:
-    weight = ckpt / "unet" / "diffusion_pytorch_model.fp16.safetensors"
-    if not weight.exists():
-        weight = ckpt / "unet" / "diffusion_pytorch_model.safetensors"
-    try:
-        resolved = weight.resolve()
-        return resolved.is_file() and resolved.stat().st_size > 1_000_000
-    except OSError:
-        return False
-
-
 def _load_marigold_pipe(device: str):
-    from marigold import MarigoldDepthPipeline
+    from src.models.marigold_pipe_loader import load_marigold_depth_pipeline
 
-    ckpt_b = ROOT / "checkpoints" / "model_B_marigold"
-    hub = (
-        str(ckpt_b)
-        if (ckpt_b / "unet" / "config.json").exists()
-        and (ckpt_b / "model_index.json").exists()
-        and _checkpoint_usable(ckpt_b)
-        else "prs-eth/marigold-depth-v1-1"
-    )
-    pipe = MarigoldDepthPipeline.from_pretrained(
-        hub,
-        torch_dtype=torch.float16,
-        variant="fp16",
-        cache_dir=_hf_home(),
-        use_safetensors=True,
-    )
-    return pipe.to(device)
+    return load_marigold_depth_pipeline(device, ROOT / "checkpoints" / "model_B_marigold")
 
 
 def _preload_spatial_labels(pairs: list) -> dict[str, list]:

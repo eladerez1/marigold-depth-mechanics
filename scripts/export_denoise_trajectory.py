@@ -42,42 +42,10 @@ from src.extraction.denoise_trajectory import (  # noqa: E402
 )
 
 
-def _hf_home() -> str:
-    return os.environ.get("HF_HOME", "/raid/homes/elad.e/.cache/huggingface")
-
-
-def _checkpoint_usable(ckpt: Path) -> bool:
-    """Local snapshot may symlink to DGX-only HF cache — verify weights resolve."""
-    weight = ckpt / "unet" / "diffusion_pytorch_model.fp16.safetensors"
-    if not weight.exists():
-        weight = ckpt / "unet" / "diffusion_pytorch_model.safetensors"
-    try:
-        resolved = weight.resolve()
-        return resolved.is_file() and resolved.stat().st_size > 1_000_000
-    except OSError:
-        return False
-
-
 def _load_pipe(device: str):
-    from marigold import MarigoldDepthPipeline
+    from src.models.marigold_pipe_loader import load_marigold_depth_pipeline
 
-    ckpt = ROOT / "checkpoints" / "model_B_marigold"
-    hub = (
-        str(ckpt)
-        if (ckpt / "unet" / "config.json").exists()
-        and (ckpt / "model_index.json").exists()
-        and _checkpoint_usable(ckpt)
-        else "prs-eth/marigold-depth-v1-1"
-    )
-    print(f"Loading Marigold from: {hub}")
-    pipe = MarigoldDepthPipeline.from_pretrained(
-        hub,
-        torch_dtype=torch.float16,
-        variant="fp16",
-        cache_dir=_hf_home(),
-        use_safetensors=True,
-    )
-    return pipe.to(device)
+    return load_marigold_depth_pipeline(device, ROOT / "checkpoints" / "model_B_marigold")
 
 
 def _tensor_to_uint8_rgb(t: torch.Tensor) -> np.ndarray:
