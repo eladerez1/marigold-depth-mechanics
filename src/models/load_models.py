@@ -10,6 +10,8 @@ from typing import Any
 import torch
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
 
+from src.models.checkpoint_paths import model_c_dir
+
 
 class ModelID(str, Enum):
     A = "A"  # SD2 vanilla
@@ -53,7 +55,7 @@ def load_model(
         scheduler = DDIMScheduler.from_pretrained(path, subfolder="scheduler")
         steps = 10 if model_id == ModelID.B else 1
     elif model_id == ModelID.C:
-        path = root / "model_C"
+        path = model_c_dir(root)
         unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet", torch_dtype=dtype)
         vae = AutoencoderKL.from_pretrained(path, subfolder="vae", torch_dtype=dtype)
         scheduler = DDIMScheduler.from_pretrained(path, subfolder="scheduler")

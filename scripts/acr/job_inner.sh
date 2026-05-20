@@ -78,7 +78,7 @@ case "${ACR_JOB:-probing}" in
       EXTRA_ARGS+=(--data_root "${MARIGOLD_BASE_DATA_DIR}")
     fi
     _run_python src/models/train_single_step.py \
-      --output_dir "${PROJ}/checkpoints/model_C" \
+      --output_dir "${PROJ}/results/model_C" \
       --train_data "${TRAIN_DATA:-nyu}" \
       --steps "${TRAIN_STEPS:-30000}" \
       --batch_size 2 \
@@ -96,7 +96,7 @@ case "${ACR_JOB:-probing}" in
         EXTRA_ARGS+=(--data_root "${MARIGOLD_BASE_DATA_DIR}")
       fi
       _run_python src/models/train_single_step.py \
-        --output_dir "${PROJ}/checkpoints/model_C" \
+        --output_dir "${PROJ}/results/model_C" \
         --train_data "${TRAIN_DATA:-nyu}" \
         --steps "${TRAIN_STEPS:-30000}" \
         --batch_size 2 \

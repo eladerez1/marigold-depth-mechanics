@@ -7,6 +7,8 @@ run:
   shm_size: "32g"
   volumes:
     - /isilon:/isilon:ro
+    # Project tree rw overlay (checkpoints/results writes from training jobs)
+    - /isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics:/isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics:rw
     - /raid/homes/elad.e:/raid/homes/elad.e:ro
   env:
     HF_HOME: /isilon/Automotive/RnD/elad.e/.cache/huggingface

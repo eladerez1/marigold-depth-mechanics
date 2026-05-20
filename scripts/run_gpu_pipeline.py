@@ -32,6 +32,7 @@ from src.extraction.feature_extractor import (
     list_resnet_hook_layers,
     subsample_layers,
 )
+from src.models.checkpoint_paths import model_c_dir, model_c_ready
 from src.models.load_models import load_unet_pair_for_delta
 from src.probing.spatial_labels import make_spatial_probe_labels
 from src.probing.spatial_probe import train_spatial_probes_for_model
@@ -296,7 +297,7 @@ def run_probing(
         raise RuntimeError(f"No NYU pairs under {NYU_RGB_ROOT}")
     n_images = len(pairs)
 
-    if "C" in model_list and not (ROOT / "checkpoints" / "model_C" / "unet" / "config.json").exists():
+    if "C" in model_list and not model_c_ready(ROOT / "checkpoints"):
         print("Model C not trained — skipping C (see src/models/train_single_step.py)")
         model_list = [m for m in model_list if m != "C"]
 
@@ -358,7 +359,9 @@ def run_probing(
         elif mid == "C":
             pipe_c = _load_marigold_pipe(device)
             pipe_c.unet = UNet2DConditionModel.from_pretrained(
-                ROOT / "checkpoints" / "model_C", subfolder="unet", torch_dtype=torch.float16
+                model_c_dir(ROOT / "checkpoints"),
+                subfolder="unet",
+                torch_dtype=torch.float16,
             ).to(device)
             rows2, rows3 = _probe_marigold_streaming(
                 pipe_c, pairs, device, 1, "C", n_images, target_layers

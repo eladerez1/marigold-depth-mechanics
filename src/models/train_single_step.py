@@ -51,6 +51,8 @@ from src.dataset.mixed_sampler import MixedBatchSampler  # noqa: E402
 from src.util.depth_transform import get_depth_normalizer  # noqa: E402
 from src.util.loss import SILogMSELoss  # noqa: E402
 
+from src.models.checkpoint_paths import model_c_dir  # noqa: E402
+
 _nyu = _load_nyu_module()
 NYUMarigoldTrainDataset = _nyu.NYUMarigoldTrainDataset
 collect_nyu_train_pairs = _nyu.collect_nyu_train_pairs
@@ -58,7 +60,12 @@ collect_nyu_train_pairs = _nyu.collect_nyu_train_pairs
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Model C (single-step regression)")
-    p.add_argument("--output_dir", type=str, default="checkpoints/model_C")
+    p.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Default: results/model_C in ACR (isilon ro), else checkpoints/model_C",
+    )
     p.add_argument(
         "--train_data",
         type=str,
@@ -302,8 +309,9 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda")
-    out_dir = Path(args.output_dir)
+    out_dir = Path(args.output_dir) if args.output_dir else model_c_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
+    logging.info("Model C output dir: %s", out_dir)
 
     cfg = OmegaConf.load(ROOT / "config" / "train_model_c.yaml")
     data_root = resolve_data_root(args.data_root)
