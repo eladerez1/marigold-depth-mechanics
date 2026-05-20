@@ -108,8 +108,10 @@ def train_spatial_probe(
         train_x.append(xi)
         train_y.append(yi)
     val_x, val_y = [], []
-    for i in val_idx:
+    val_cap = min(len(val_idx), max(64, 200_000 // max(max_pixels_per_image, 1)))
+    for i in val_idx[:val_cap]:
         xi, yi, _ = _align_feat_label(feat_maps[i], label_maps[i], task_name)
+        xi, yi = _sample_pixels(xi, yi, max_pixels_per_image, rng)
         val_x.append(xi)
         val_y.append(yi)
 
@@ -189,6 +191,8 @@ def train_spatial_probes_for_model(
     exp02_rows: list = []
     exp03_rows: list = []
     dev = torch.device(device)
+    # Scale down pixel budget so 1000-image runs finish in reasonable time.
+    max_pixels = min(4096, max(512, 500_000 // max(n_images, 1)))
 
     for task_name in tasks:
         label_maps = labels_acc[task_name]
@@ -199,9 +203,20 @@ def train_spatial_probes_for_model(
         layer_task_t: dict[str, dict[int, float]] = {layer: {} for layer in layer_names}
         t_layer: dict[int, dict[str, float]] = {}
 
+        t_items = sorted(feats[layer_names[0]].items(), key=lambda x: x[0])
+        if len(t_items) > 5 and n_images > 300:
+            t_items = [t_items[0], t_items[len(t_items) // 2], t_items[-1]]
+            print(
+                f"spatial-{model_id}-{task_name}: subsampled {len(t_items)} timesteps "
+                f"(n_images={n_images})",
+                flush=True,
+            )
+
         for layer in tqdm(layer_names, desc=f"spatial-{model_id}-{task_name}", leave=False):
             for t_int, feat_list in feats[layer].items():
                 if len(feat_list) != n_images:
+                    continue
+                if n_images > 300 and t_int not in {ti for ti, _ in t_items}:
                     continue
                 metrics = train_spatial_probe(
                     feat_list,
@@ -209,6 +224,7 @@ def train_spatial_probes_for_model(
                     task_name,
                     train_idx,
                     val_idx,
+                    max_pixels_per_image=max_pixels,
                     device=dev,
                     seed=hash((model_id, layer, t_int, task_name)) % (2**31),
                 )

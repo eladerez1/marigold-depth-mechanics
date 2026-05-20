@@ -259,7 +259,9 @@ def run_probing(device: str, max_images: int, n_steps: int, models: str = "B,D,A
 
     pipe = _load_marigold_pipe(device)
     pipe.encode_empty_text()
-    target_layers = subsample_layers(list_resnet_hook_layers(pipe.unet))
+    max_layers = 12 if n_images <= 200 else (6 if n_images <= 500 else 4)
+    target_layers = subsample_layers(list_resnet_hook_layers(pipe.unet), max_layers=max_layers)
+    print(f"Probing {n_images} images, {len(target_layers)} layers, models={model_list}", flush=True)
 
     all_feats: dict[str, dict] = {}
     exp02_rows: list = []
