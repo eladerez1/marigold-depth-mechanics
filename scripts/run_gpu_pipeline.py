@@ -21,7 +21,26 @@ from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[1]
 MARIGOLD_ROOT = ROOT / "third_party" / "Marigold"
-# Marigold repo also has `src/` — project root must be first on sys.path.
+
+
+def _load_module_from_path(module_name: str, path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_ckpt_paths = _load_module_from_path(
+    "marigold_checkpoint_paths", ROOT / "src" / "models" / "checkpoint_paths.py"
+)
+model_c_dir = _ckpt_paths.model_c_dir
+model_c_ready = _ckpt_paths.model_c_ready
+
+# Project root first for probing code; Marigold for pipeline.
 sys.path.insert(0, str(MARIGOLD_ROOT))
 sys.path.insert(0, str(ROOT))
 
@@ -32,7 +51,6 @@ from src.extraction.feature_extractor import (
     list_resnet_hook_layers,
     subsample_layers,
 )
-from src.models.checkpoint_paths import model_c_dir, model_c_ready
 from src.models.load_models import load_unet_pair_for_delta
 from src.probing.spatial_labels import make_spatial_probe_labels
 from src.probing.spatial_probe import train_spatial_probes_for_model

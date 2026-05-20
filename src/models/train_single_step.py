@@ -29,17 +29,26 @@ ROOT = Path(__file__).resolve().parents[2]
 MARIGOLD_ROOT = ROOT / "third_party" / "Marigold"
 
 
-def _load_nyu_module():
+def _load_module_from_path(module_name: str, path: Path):
+    """Load a project file without importing project `src` (shadowed by Marigold)."""
     import importlib.util
 
-    path = ROOT / "src" / "data" / "nyu_marigold_train.py"
-    spec = importlib.util.spec_from_file_location("nyu_marigold_train", path)
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
+
+_ckpt_paths = _load_module_from_path(
+    "marigold_checkpoint_paths", ROOT / "src" / "models" / "checkpoint_paths.py"
+)
+model_c_dir = _ckpt_paths.model_c_dir
+
+_nyu = _load_module_from_path(
+    "nyu_marigold_train", ROOT / "src" / "data" / "nyu_marigold_train.py"
+)
 
 # Marigold's `src` must win over the project package of the same name.
 sys.path.insert(0, str(ROOT))
@@ -51,9 +60,6 @@ from src.dataset.mixed_sampler import MixedBatchSampler  # noqa: E402
 from src.util.depth_transform import get_depth_normalizer  # noqa: E402
 from src.util.loss import SILogMSELoss  # noqa: E402
 
-from src.models.checkpoint_paths import model_c_dir  # noqa: E402
-
-_nyu = _load_nyu_module()
 NYUMarigoldTrainDataset = _nyu.NYUMarigoldTrainDataset
 collect_nyu_train_pairs = _nyu.collect_nyu_train_pairs
 
@@ -247,13 +253,18 @@ def save_checkpoint(pipe: MarigoldDepthPipeline, out_dir: Path, step: int) -> No
     pipe.unet.save_pretrained(ckpt / "unet")
     pipe.vae.save_pretrained(ckpt / "vae")
     pipe.scheduler.save_pretrained(ckpt / "scheduler")
-    # Latest layout for load_models.py
+    # Latest layout for load_models.py (copy — symlinks break on some ACR mounts)
+    import shutil
+
     for sub in ("unet", "vae", "scheduler"):
         dst = out_dir / sub
         src = ckpt / sub
-        if dst.exists() or dst.is_symlink():
-            dst.unlink()
-        dst.symlink_to(src.resolve())
+        if dst.exists():
+            if dst.is_symlink():
+                dst.unlink()
+            else:
+                shutil.rmtree(dst)
+        shutil.copytree(src, dst)
 
 
 def warmup_lambda(step: int, warmup: int) -> float:
