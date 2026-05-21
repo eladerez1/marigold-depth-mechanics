@@ -113,13 +113,20 @@ def resolve_data_root(explicit: str | None) -> Path | None:
     return None
 
 
-def resolve_base_ckpt(explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    local = ROOT / "checkpoints" / "model_A_sd2"
-    if (local / "unet" / "config.json").exists():
-        return str(local)
-    return "stabilityai/stable-diffusion-2"
+def resolve_pipeline_hub() -> str:
+    """Hub path with tokenizer/vae/text_encoder (model_A_sd2 is UNet-only)."""
+    for candidate in (
+        ROOT / "checkpoints" / "model_B_marigold",
+        "prs-eth/marigold-depth-v1-1",
+        "stabilityai/stable-diffusion-2",
+    ):
+        path = Path(candidate) if not isinstance(candidate, Path) else candidate
+        if isinstance(path, Path):
+            if (path / "tokenizer").exists() or (path / "tokenizer" / "tokenizer_config.json").exists():
+                return str(path)
+        else:
+            return candidate
+    return "prs-eth/marigold-depth-v1-1"
 
 
 def adapt_unet_8ch(pipe: MarigoldDepthPipeline) -> None:
@@ -141,33 +148,31 @@ def adapt_unet_8ch(pipe: MarigoldDepthPipeline) -> None:
     pipe.unet.config["in_channels"] = 8
 
 
-def build_pipeline(base_ckpt: str, device: torch.device) -> MarigoldDepthPipeline:
+def build_pipeline(device: torch.device) -> MarigoldDepthPipeline:
+    from diffusers import UNet2DConditionModel
+
     cache = os.environ.get(
         "HF_HOME", "/isilon/Automotive/RnD/elad.e/.cache/huggingface"
     )
-    hub = base_ckpt
-    if hub == "stabilityai/stable-diffusion-2":
-        try:
-            pipe = MarigoldDepthPipeline.from_pretrained(
-                hub, torch_dtype=torch.float16, cache_dir=cache
-            )
-        except OSError:
-            pipe = MarigoldDepthPipeline.from_pretrained(
-                "prs-eth/marigold-depth-v1-1",
-                torch_dtype=torch.float16,
-                cache_dir=cache,
-            )
-            from diffusers import UNet2DConditionModel
-
-            unet = UNet2DConditionModel.from_pretrained(
-                ROOT / "checkpoints" / "model_A_sd2",
-                subfolder="unet",
-                torch_dtype=torch.float16,
-            )
-            pipe.unet = unet
-    else:
+    hub = resolve_pipeline_hub()
+    logging.info("Loading MarigoldDepthPipeline from %s", hub)
+    try:
         pipe = MarigoldDepthPipeline.from_pretrained(
             hub, torch_dtype=torch.float16, cache_dir=cache
+        )
+    except OSError as e:
+        logging.warning("Hub load failed (%s), trying prs-eth/marigold-depth-v1-1", e)
+        pipe = MarigoldDepthPipeline.from_pretrained(
+            "prs-eth/marigold-depth-v1-1",
+            torch_dtype=torch.float16,
+            cache_dir=cache,
+        )
+
+    unet_a = ROOT / "checkpoints" / "model_A_sd2" / "unet"
+    if (unet_a / "config.json").exists():
+        logging.info("Using SD2 vanilla UNet from %s", unet_a)
+        pipe.unet = UNet2DConditionModel.from_pretrained(
+            unet_a.parent, subfolder="unet", torch_dtype=torch.float16
         )
     adapt_unet_8ch(pipe)
     pipe.encode_empty_text()
@@ -332,7 +337,7 @@ def main() -> None:
     else:
         train_key = "hypersim,vkitti"
 
-    pipe = build_pipeline(resolve_base_ckpt(args.base_ckpt), device)
+    pipe = build_pipeline(device)
     loader = build_train_loader(
         train_key,
         data_root,
