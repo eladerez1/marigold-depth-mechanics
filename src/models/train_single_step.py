@@ -113,20 +113,13 @@ def resolve_data_root(explicit: str | None) -> Path | None:
     return None
 
 
-def resolve_pipeline_hub() -> str:
-    """Hub path with tokenizer/vae/text_encoder (model_A_sd2 is UNet-only)."""
-    for candidate in (
-        ROOT / "checkpoints" / "model_B_marigold",
-        "prs-eth/marigold-depth-v1-1",
-        "stabilityai/stable-diffusion-2",
-    ):
-        path = Path(candidate) if not isinstance(candidate, Path) else candidate
-        if isinstance(path, Path):
-            if (path / "tokenizer").exists() or (path / "tokenizer" / "tokenizer_config.json").exists():
-                return str(path)
-        else:
-            return candidate
-    return "prs-eth/marigold-depth-v1-1"
+def _pipeline_skeleton_usable(path: Path) -> bool:
+    """model_A_sd2 is UNet-only; need tokenizer + scheduler for from_pretrained."""
+    return (
+        (path / "tokenizer" / "tokenizer_config.json").exists()
+        and (path / "scheduler" / "scheduler_config.json").exists()
+        and (path / "vae" / "config.json").exists()
+    )
 
 
 def adapt_unet_8ch(pipe: MarigoldDepthPipeline) -> None:
@@ -151,29 +144,22 @@ def adapt_unet_8ch(pipe: MarigoldDepthPipeline) -> None:
 def build_pipeline(device: torch.device) -> MarigoldDepthPipeline:
     from diffusers import UNet2DConditionModel
 
-    cache = os.environ.get(
-        "HF_HOME", "/isilon/Automotive/RnD/elad.e/.cache/huggingface"
+    loader_mod = _load_module_from_path(
+        "marigold_pipe_loader", ROOT / "src" / "models" / "marigold_pipe_loader.py"
     )
-    hub = resolve_pipeline_hub()
-    logging.info("Loading MarigoldDepthPipeline from %s", hub)
-    try:
-        pipe = MarigoldDepthPipeline.from_pretrained(
-            hub, torch_dtype=torch.float16, cache_dir=cache
+    ckpt_b = ROOT / "checkpoints" / "model_B_marigold"
+    if not _pipeline_skeleton_usable(ckpt_b):
+        logging.warning(
+            "Local Marigold checkpoint incomplete at %s; using HF hub loader", ckpt_b
         )
-    except OSError as e:
-        logging.warning("Hub load failed (%s), trying prs-eth/marigold-depth-v1-1", e)
-        pipe = MarigoldDepthPipeline.from_pretrained(
-            "prs-eth/marigold-depth-v1-1",
-            torch_dtype=torch.float16,
-            cache_dir=cache,
-        )
+    pipe = loader_mod.load_marigold_depth_pipeline(str(device), ckpt_b)
 
     unet_a = ROOT / "checkpoints" / "model_A_sd2" / "unet"
     if (unet_a / "config.json").exists():
-        logging.info("Using SD2 vanilla UNet from %s", unet_a)
+        logging.info("Replacing UNet with SD2 vanilla from %s", unet_a.parent)
         pipe.unet = UNet2DConditionModel.from_pretrained(
             unet_a.parent, subfolder="unet", torch_dtype=torch.float16
-        )
+        ).to(device)
     adapt_unet_8ch(pipe)
     pipe.encode_empty_text()
     pipe.vae.requires_grad_(False)
