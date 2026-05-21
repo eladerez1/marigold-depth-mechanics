@@ -20,6 +20,18 @@ For `marigold_depth_mechanics`, **never use dgx04** for GPU jobs (ACR or manual 
    - `export_denoise` — PCA trajectory export
 3. Monitor: `acr jobs`, `acr logs <id> -f`, dashboard http://10.1.1.136:8082
 
+## Post-submit monitoring (required)
+
+After **every** `./scripts/acr_submit.sh` (or any `acr run`):
+
+1. Record the job id in your reply.
+2. **First check at 5 minutes** — `acr jobs --user elad.e` and `acr logs <id>` (or tail `results/*_acr.log` on isilon).
+3. **Every 5 minutes while** status is `pending`, `allocated`, or `running` — repeat until `completed`, `failed`, or `cancelled`.
+4. On `failed`, read the log tail immediately, fix, push, resubmit.
+5. Optional background helper: `./scripts/acr_monitor.sh <job_id> 300 &`
+
+Do not submit and forget; short failures (bad imports, ro filesystem) should be caught within one 5-minute cycle.
+
 ## Examples
 
 ```bash
