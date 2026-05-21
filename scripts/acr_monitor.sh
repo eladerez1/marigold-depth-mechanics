@@ -16,7 +16,12 @@ _log() {
 }
 
 _match_line() {
-  acr jobs --user "$USER" 2>/dev/null | grep -E "${JOB_PREFIX}" | head -1 || true
+  acr jobs --user "$USER" 2>/dev/null | grep -F "${JOB_PREFIX}" | head -1 || true
+}
+
+_job_status() {
+  local line="$1"
+  echo "$line" | sed -n 's/.*│ \([^│]*\) │.*/\1/p' | head -1 | tr -d ' '
 }
 
 _log "monitor start job=${JOB_PREFIX} interval=${INTERVAL}s log=${LOG}"
@@ -28,7 +33,8 @@ while true; do
     _log "job not found in acr jobs (may have aged out)"
     break
   fi
-  status="$(echo "$line" | awk '{print $3}')"
+  status="$(_job_status "$line")"
+  [[ -z "$status" ]] && status="$(echo "$line" | awk '{print $3}')"
   _log "status=${status} | ${line}"
   if [[ ! " ${ACTIVE} " =~ " ${status} " ]]; then
     _log "terminal status=${status} — stopping monitor"

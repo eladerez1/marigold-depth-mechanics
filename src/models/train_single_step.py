@@ -281,15 +281,16 @@ def train_step(
         gt_latent = pipe.encode_rgb(depth_norm.repeat(1, 3, 1, 1))
 
     scheduler.set_timesteps(1, device=device)
-    t = scheduler.timesteps[0].expand(rgb_latent.shape[0])
+    t_unet = scheduler.timesteps[0].expand(rgb_latent.shape[0]).to(device)
+    t_step = scheduler.timesteps[0].cpu().expand(rgb_latent.shape[0])
     target_latent = torch.randn(
         gt_latent.shape, device=device, dtype=rgb_latent.dtype
     )
     text_embed = empty_text.repeat(rgb_latent.shape[0], 1, 1)
 
     unet_in = torch.cat([rgb_latent, target_latent], dim=1).float()
-    noise_pred = pipe.unet(unet_in, t, encoder_hidden_states=text_embed).sample
-    pred_latent = scheduler.step(noise_pred, t, target_latent).prev_sample
+    noise_pred = pipe.unet(unet_in, t_unet, encoder_hidden_states=text_embed).sample
+    pred_latent = scheduler.step(noise_pred, t_step, target_latent).prev_sample
 
     latent_mse = torch.nn.functional.mse_loss(
         pred_latent.float(), gt_latent.float()
