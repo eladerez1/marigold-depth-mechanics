@@ -406,21 +406,23 @@ def run_probing(
     with (out04 / "cka_matrix.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["model_a", "model_b", "layer", "cka"])
-        if "B" in all_feats and "D" in all_feats:
-            common = sorted(set(all_feats["B"]) & set(all_feats["D"]))
-            if len(common) > 12:
-                common = common[:: max(1, len(common) // 12)]
-            for layer in common:
-                ts_b = sorted(all_feats["B"][layer].keys())
-                ts_d = sorted(all_feats["D"][layer].keys())
-                if not ts_b or not ts_d:
-                    continue
-                fb = all_feats["B"][layer][ts_b[len(ts_b) // 2]]
-                fd = all_feats["D"][layer][ts_d[-1]]
-                xb = torch.stack([f.mean(dim=(1, 2)) for f in fb], dim=0)
-                xd = torch.stack([f.mean(dim=(1, 2)) for f in fd], dim=0)
-                if xb.shape == xd.shape:
-                    w.writerow(["B", "D", layer, f"{linear_cka(xb, xd):.4f}"])
+        feat_models = sorted(all_feats.keys())
+        for i, ma in enumerate(feat_models):
+            for mb in feat_models[i + 1 :]:
+                common = sorted(set(all_feats[ma]) & set(all_feats[mb]))
+                if len(common) > 12:
+                    common = common[:: max(1, len(common) // 12)]
+                for layer in common:
+                    ts_a = sorted(all_feats[ma][layer].keys())
+                    ts_b = sorted(all_feats[mb][layer].keys())
+                    if not ts_a or not ts_b:
+                        continue
+                    fa = all_feats[ma][layer][ts_a[len(ts_a) // 2]]
+                    fb = all_feats[mb][layer][ts_b[len(ts_b) // 2]]
+                    xa = torch.stack([f.mean(dim=(1, 2)) for f in fa], dim=0)
+                    xb = torch.stack([f.mean(dim=(1, 2)) for f in fb], dim=0)
+                    if xa.shape == xb.shape:
+                        w.writerow([ma, mb, layer, f"{linear_cka(xa, xb):.4f}"])
 
     import sys as _sys
     from src.visualization.plot_all import main as plot_all_main
