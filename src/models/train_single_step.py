@@ -169,9 +169,10 @@ def build_pipeline(device: torch.device) -> MarigoldDepthPipeline:
     pipe.vae.requires_grad_(False)
     if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
         pipe.text_encoder.requires_grad_(False)
-    # Cast UNet to fp32 for stable training — fp16 attention overflows to NaN
-    # at t=999 on V100. The VAE stays fp16 (inference-only, no_grad).
+    # Cast UNet and VAE to fp32 — fp16 attention overflows to NaN on V100.
+    # VAE is inference-only (no_grad) so the fp32 overhead is negligible.
     pipe.unet = pipe.unet.float()
+    pipe.vae = pipe.vae.float()
     pipe.unet.requires_grad_(True)
     pipe.to(device)
     return pipe
