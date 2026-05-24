@@ -84,12 +84,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--data_root", type=str, default=None, help="MARIGOLD_BASE_DATA_DIR")
     p.add_argument("--base_ckpt", type=str, default=None, help="SD2 / model_A root")
-    p.add_argument("--steps", type=int, default=30_000)
+    p.add_argument("--steps", type=int, default=5_000)
     p.add_argument("--batch_size", type=int, default=2)
     p.add_argument("--grad_accum", type=int, default=4)
     p.add_argument("--lr", type=float, default=3e-5)
-    p.add_argument("--warmup_steps", type=int, default=500)
-    p.add_argument("--save_every", type=int, default=5000)
+    p.add_argument("--warmup_steps", type=int, default=200)
+    p.add_argument("--save_every", type=int, default=1000)
     p.add_argument("--log_every", type=int, default=50)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max_nyu_images", type=int, default=None)
@@ -169,6 +169,9 @@ def build_pipeline(device: torch.device) -> MarigoldDepthPipeline:
     pipe.vae.requires_grad_(False)
     if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
         pipe.text_encoder.requires_grad_(False)
+    # Cast UNet to fp32 for stable training — fp16 attention overflows to NaN
+    # at t=999 on V100. The VAE stays fp16 (inference-only, no_grad).
+    pipe.unet = pipe.unet.float()
     pipe.unet.requires_grad_(True)
     pipe.to(device)
     return pipe
@@ -367,9 +370,8 @@ def main() -> None:
     pbar = tqdm(total=args.steps, desc="Model C")
     while effective < args.steps:
         for batch in loader:
-            # Use fp16 (not bf16): V100 has native fp16 TensorCores but no bf16.
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                loss = train_step(pipe, batch, device, empty_text)
+            # UNet is fp32; no autocast needed (fp16 attention overflows on V100).
+            loss = train_step(pipe, batch, device, empty_text)
             if not torch.isfinite(loss):
                 logging.warning("step %d: non-finite loss %.5f — skipping", effective, loss.item())
                 optimizer.zero_grad(set_to_none=True)
