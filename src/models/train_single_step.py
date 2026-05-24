@@ -25,6 +25,10 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 
+# Fixed timestep for single-step regression training.
+# Using t=999 tells the UNet "full noise → clean depth" in one shot.
+_TRAIN_TIMESTEP = 999
+
 ROOT = Path(__file__).resolve().parents[2]
 MARIGOLD_ROOT = ROOT / "third_party" / "Marigold"
 
@@ -200,7 +204,7 @@ def build_train_loader(
             batch_size=batch_size,
             shuffle=True,
             drop_last=True,
-            num_workers=2,
+            num_workers=4,
             generator=gen,
             pin_memory=True,
         )
@@ -235,7 +239,7 @@ def build_train_loader(
         shuffle=True,
         generator=gen,
     )
-    return DataLoader(concat, batch_sampler=sampler, num_workers=2, pin_memory=True)
+    return DataLoader(concat, batch_sampler=sampler, num_workers=4, pin_memory=True)
 
 
 def save_checkpoint(pipe: MarigoldDepthPipeline, out_dir: Path, step: int) -> None:
@@ -268,37 +272,31 @@ def train_step(
     pipe: MarigoldDepthPipeline,
     batch: dict,
     device: torch.device,
-    scheduler: DDIMScheduler,
-    loss_fn: SILogMSELoss,
     empty_text: torch.Tensor,
 ) -> torch.Tensor:
-    rgb = batch["rgb_norm"].to(device, dtype=torch.float16)
-    depth_norm = batch["depth_raw_norm"].to(device, dtype=torch.float16)
-    valid_mask = batch["valid_mask_raw"].to(device)
+    """Single-step regression: predict depth latent directly from rgb latent.
+
+    We skip the DDIM scheduler.step entirely. At t=_TRAIN_TIMESTEP the UNet
+    receives [rgb_latent | noise] and is supervised to output the GT depth
+    latent with MSE loss. This avoids the 0/0 in the zero-SNR DDIM formula
+    (which caused NaN) and the expensive per-step VAE decode (which caused
+    ~12 s/step on V100).
+    """
+    rgb = batch["rgb_norm"].to(device)
+    depth_norm = batch["depth_raw_norm"].to(device)
 
     with torch.no_grad():
         rgb_latent = pipe.encode_rgb(rgb)
         gt_latent = pipe.encode_rgb(depth_norm.repeat(1, 3, 1, 1))
 
-    scheduler.set_timesteps(1, device=device)
-    t_scalar = int(scheduler.timesteps[0].item())  # DDIM needs Python int for indexing
-    t_unet = torch.tensor([t_scalar] * rgb_latent.shape[0], device=device, dtype=torch.long)
-    target_latent = torch.randn(
-        gt_latent.shape, device=device, dtype=rgb_latent.dtype
-    )
-    text_embed = empty_text.repeat(rgb_latent.shape[0], 1, 1)
+    B = rgb_latent.shape[0]
+    noise_latent = torch.randn_like(gt_latent)
+    t = torch.full((B,), _TRAIN_TIMESTEP, device=device, dtype=torch.long)
+    text_embed = empty_text.repeat(B, 1, 1)
 
-    unet_in = torch.cat([rgb_latent, target_latent], dim=1).float()
-    noise_pred = pipe.unet(unet_in, t_unet, encoder_hidden_states=text_embed).sample
-    pred_latent = scheduler.step(noise_pred, t_scalar, target_latent).prev_sample
-
-    latent_mse = torch.nn.functional.mse_loss(
-        pred_latent.float(), gt_latent.float()
-    )
-    depth_pred = pipe.decode_depth(pred_latent.float())
-    depth_gt_metric = batch["depth_raw_linear"].to(device)
-    silog = loss_fn(depth_pred, depth_gt_metric, valid_mask)
-    return latent_mse + silog
+    unet_in = torch.cat([rgb_latent, noise_latent], dim=1)
+    pred_latent = pipe.unet(unet_in, t, encoder_hidden_states=text_embed).sample
+    return torch.nn.functional.mse_loss(pred_latent, gt_latent.to(pred_latent.dtype))
 
 
 def main() -> None:
@@ -341,7 +339,6 @@ def main() -> None:
     )
     pipe.scheduler = scheduler
 
-    loss_fn = SILogMSELoss(lamb=0.5, log_pred=False, batch_reduction=True)
     empty_text = pipe.empty_text_embed.detach().to(device)
 
     optimizer = AdamW(pipe.unet.parameters(), lr=args.lr)
@@ -370,14 +367,19 @@ def main() -> None:
     pbar = tqdm(total=args.steps, desc="Model C")
     while effective < args.steps:
         for batch in loader:
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                loss = train_step(
-                    pipe, batch, device, scheduler, loss_fn, empty_text
-                )
+            # Use fp16 (not bf16): V100 has native fp16 TensorCores but no bf16.
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                loss = train_step(pipe, batch, device, empty_text)
+            if not torch.isfinite(loss):
+                logging.warning("step %d: non-finite loss %.5f — skipping", effective, loss.item())
+                optimizer.zero_grad(set_to_none=True)
+                accum = 0
+                continue
             (loss / args.grad_accum).backward()
             accum += 1
             if accum < args.grad_accum:
                 continue
+            torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
             optimizer.step()
             lr_sched.step()
             optimizer.zero_grad(set_to_none=True)
