@@ -241,10 +241,16 @@ def _probe_marigold_streaming(
     model_id: str,
     n_images: int,
     target_layers: list[str],
-) -> tuple[list, list]:
+) -> tuple[list, list, dict]:
+    """Returns (exp02_rows, exp03_rows, cka_feats).
+
+    cka_feats[layer] is a float32 [N, C] tensor of mean-pooled activations at
+    the middle timestep — kept for cross-model CKA computation in exp04.
+    """
     labels = _preload_spatial_labels(pairs)
     exp02_rows: list = []
     exp03_rows: list = []
+    cka_feats: dict = {}
     for layer in tqdm(target_layers, desc=f"layers-{model_id}"):
         feats = _extract_marigold_one_layer(
             pipe, pairs, device, n_steps, layer, desc=f"extract-{model_id}"
@@ -254,9 +260,18 @@ def _probe_marigold_streaming(
         )
         exp02_rows.extend(r2)
         exp03_rows.extend(r3)
+        # Store mean-pooled [N, C] tensor at representative timestep for CKA
+        layer_feats = feats.get(layer, {})
+        ts = sorted(layer_feats.keys())
+        if ts:
+            rep_t = ts[len(ts) // 2]
+            imgs = layer_feats[rep_t]
+            cka_feats[layer] = torch.stack(
+                [f.mean(dim=(1, 2)) for f in imgs], dim=0
+            ).float().cpu()
         del feats
         torch.cuda.empty_cache()
-    return exp02_rows, exp03_rows
+    return exp02_rows, exp03_rows, cka_feats
 
 
 def _load_existing_probe_rows(
@@ -338,12 +353,12 @@ def run_probing(
     for mid in model_list:
         if mid in ("B", "D"):
             steps = n_steps if mid == "B" else 1
-            rows2, rows3 = _probe_marigold_streaming(
+            rows2, rows3, cka = _probe_marigold_streaming(
                 pipe, pairs, device, steps, mid, n_images, target_layers
             )
             exp02_rows.extend(rows2)
             exp03_rows.extend(rows3)
-            all_feats[mid] = {}
+            all_feats[mid] = cka  # {layer: [N, C] tensor}
         elif mid == "A":
             ckpt_a = ROOT / "checkpoints" / "model_A_sd2"
             if not (ckpt_a / "unet" / "config.json").exists():
@@ -381,12 +396,12 @@ def run_probing(
                 subfolder="unet",
                 torch_dtype=torch.float16,
             ).to(device)
-            rows2, rows3 = _probe_marigold_streaming(
+            rows2, rows3, cka = _probe_marigold_streaming(
                 pipe_c, pairs, device, 1, "C", n_images, target_layers
             )
             exp02_rows.extend(rows2)
             exp03_rows.extend(rows3)
-            all_feats["C"] = {}
+            all_feats["C"] = cka
 
     out02.mkdir(parents=True, exist_ok=True)
     out03.mkdir(parents=True, exist_ok=True)
@@ -406,22 +421,15 @@ def run_probing(
     with (out04 / "cka_matrix.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["model_a", "model_b", "layer", "cka"])
+        # all_feats[model][layer] = float32 [N, C] mean-pooled tensor
         feat_models = sorted(all_feats.keys())
         for i, ma in enumerate(feat_models):
-            for mb in feat_models[i + 1 :]:
+            for mb in feat_models[i + 1:]:
                 common = sorted(set(all_feats[ma]) & set(all_feats[mb]))
-                if len(common) > 12:
-                    common = common[:: max(1, len(common) // 12)]
                 for layer in common:
-                    ts_a = sorted(all_feats[ma][layer].keys())
-                    ts_b = sorted(all_feats[mb][layer].keys())
-                    if not ts_a or not ts_b:
-                        continue
-                    fa = all_feats[ma][layer][ts_a[len(ts_a) // 2]]
-                    fb = all_feats[mb][layer][ts_b[len(ts_b) // 2]]
-                    xa = torch.stack([f.mean(dim=(1, 2)) for f in fa], dim=0)
-                    xb = torch.stack([f.mean(dim=(1, 2)) for f in fb], dim=0)
-                    if xa.shape == xb.shape:
+                    xa = all_feats[ma][layer]
+                    xb = all_feats[mb][layer]
+                    if xa.shape == xb.shape and xa.shape[0] > 1:
                         w.writerow([ma, mb, layer, f"{linear_cka(xa, xb):.4f}"])
 
     import sys as _sys

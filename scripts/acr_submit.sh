@@ -31,6 +31,7 @@ NYU_INDEX=0
 NUM_SAMPLES=5
 TRAIN_DATA="${MARIGOLD_TRAIN_DATA:-nyu}"
 TRAIN_STEPS=30000
+APPEND="false"
 EXTRA_ACR_ARGS=()
 
 usage() {
@@ -68,6 +69,7 @@ while [[ $# -gt 0 ]]; do
     --max-images) MAX_IMAGES="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
     --denoise-steps) DENOISE_STEPS="$2"; shift 2 ;;
+    --append) APPEND="true" ;;
     --num-samples) NUM_SAMPLES="$2"; shift 2 ;;
     --nyu-index) NYU_INDEX="$2"; shift 2 ;;
     --train-data) TRAIN_DATA="$2"; shift 2 ;;
@@ -140,6 +142,7 @@ ACR_ARGS=(
   -e "NUM_SAMPLES=${NUM_SAMPLES}"
   -e "TRAIN_DATA=${TRAIN_DATA}"
   -e "TRAIN_STEPS=${TRAIN_STEPS}"
+  -e "APPEND=${APPEND}"
 )
 
 [[ -n "${NODE}" ]] && ACR_ARGS+=(--node "${NODE}")

@@ -41,6 +41,8 @@ case "${ACR_JOB:-probing}" in
       echo "Archived prior probing → ${ARCHIVE}"
     fi
     LOG="${LOG_DIR}/spatial_probing_acr.log"
+    PROBE_EXTRA=()
+    [[ "${APPEND:-false}" == "true" ]] && PROBE_EXTRA+=(--append)
     _run_python scripts/run_gpu_pipeline.py \
       --gpu 0 \
       --max_images "${MAX_IMAGES:-200}" \
@@ -48,6 +50,7 @@ case "${ACR_JOB:-probing}" in
       --models "${MODELS:-B,D,A}" \
       --skip-download \
       --probing-only \
+      "${PROBE_EXTRA[@]}" \
       2>&1 | tee "${LOG}"
     ;;
 
