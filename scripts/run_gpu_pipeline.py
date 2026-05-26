@@ -241,25 +241,30 @@ def _probe_marigold_streaming(
     model_id: str,
     n_images: int,
     target_layers: list[str],
-) -> tuple[list, list, dict]:
-    """Returns (exp02_rows, exp03_rows, cka_feats).
+    mlp_tasks: tuple[str, ...] = (),
+) -> tuple[list, list, list, dict]:
+    """Returns (exp02_rows, exp03_rows, exp05_rows, cka_feats).
 
     cka_feats[layer] is a float32 [N, C] tensor of mean-pooled activations at
     the middle timestep — kept for cross-model CKA computation in exp04.
+    exp05_rows contains MLP probe results for tasks listed in mlp_tasks.
     """
     labels = _preload_spatial_labels(pairs)
     exp02_rows: list = []
     exp03_rows: list = []
+    exp05_rows: list = []
     cka_feats: dict = {}
     for layer in tqdm(target_layers, desc=f"layers-{model_id}"):
         feats = _extract_marigold_one_layer(
             pipe, pairs, device, n_steps, layer, desc=f"extract-{model_id}"
         )
-        r2, r3 = train_spatial_probes_for_model(
-            model_id, feats, labels, n_images, device, layer_subsample=999
+        r2, r3, r5 = train_spatial_probes_for_model(
+            model_id, feats, labels, n_images, device,
+            layer_subsample=999, mlp_tasks=mlp_tasks,
         )
         exp02_rows.extend(r2)
         exp03_rows.extend(r3)
+        exp05_rows.extend(r5)
         # Store mean-pooled [N, C] tensor at representative timestep for CKA
         layer_feats = feats.get(layer, {})
         ts = sorted(layer_feats.keys())
@@ -271,7 +276,7 @@ def _probe_marigold_streaming(
             ).float().cpu()
         del feats
         torch.cuda.empty_cache()
-    return exp02_rows, exp03_rows, cka_feats
+    return exp02_rows, exp03_rows, exp05_rows, cka_feats
 
 
 def _load_existing_probe_rows(
@@ -317,6 +322,7 @@ def run_probing(
     n_steps: int,
     models: str = "B,D,A",
     append: bool = False,
+    mlp_depth: bool = False,
 ) -> None:
     from diffusers import UNet2DConditionModel
 
@@ -340,24 +346,40 @@ def run_probing(
     target_layers = subsample_layers(list_resnet_hook_layers(pipe.unet), max_layers=max_layers)
     print(f"Probing {n_images} images, {len(target_layers)} layers, models={model_list}", flush=True)
 
+    mlp_task_set: tuple[str, ...] = ("depth",) if mlp_depth else ()
+
     all_feats: dict[str, dict] = {}
     out02 = ROOT / "results" / "exp02"
     out03 = ROOT / "results" / "exp03"
+    out05 = ROOT / "results" / "exp05"
     skip = set(model_list) if append else set()
     exp02_rows, exp03_rows = (
         _load_existing_probe_rows(out02 / "probing_matrix.csv", skip)
         if append
         else ([], [])
     )
+    # Load existing exp05 rows (MLP probe results) when appending.
+    exp05_rows: list = []
+    if append:
+        exp05_f = out05 / "mlp_probing.csv"
+        if exp05_f.exists():
+            with exp05_f.open(newline="") as f:
+                for row in csv.DictReader(f):
+                    if row.get("model") not in skip:
+                        exp05_rows.append(
+                            [row["model"], row["layer"], row["task"], row["metric_value"]]
+                        )
 
     for mid in model_list:
         if mid in ("B", "D"):
             steps = n_steps if mid == "B" else 1
-            rows2, rows3, cka = _probe_marigold_streaming(
-                pipe, pairs, device, steps, mid, n_images, target_layers
+            rows2, rows3, rows5, cka = _probe_marigold_streaming(
+                pipe, pairs, device, steps, mid, n_images, target_layers,
+                mlp_tasks=mlp_task_set,
             )
             exp02_rows.extend(rows2)
             exp03_rows.extend(rows3)
+            exp05_rows.extend(rows5)
             all_feats[mid] = cka  # {layer: [N, C] tensor}
         elif mid == "A":
             ckpt_a = ROOT / "checkpoints" / "model_A_sd2"
@@ -381,11 +403,13 @@ def run_probing(
                     device,
                     n_images,
                 )
-                r2, r3 = train_spatial_probes_for_model(
-                    "A", feats, labels, n_images, device, layer_subsample=999
+                r2, r3, r5 = train_spatial_probes_for_model(
+                    "A", feats, labels, n_images, device,
+                    layer_subsample=999, mlp_tasks=mlp_task_set,
                 )
                 exp02_rows.extend(r2)
                 exp03_rows.extend(r3)
+                exp05_rows.extend(r5)
                 del feats
             del sd2_unet
             torch.cuda.empty_cache()
@@ -396,15 +420,18 @@ def run_probing(
                 subfolder="unet",
                 torch_dtype=torch.float16,
             ).to(device)
-            rows2, rows3, cka = _probe_marigold_streaming(
-                pipe_c, pairs, device, 1, "C", n_images, target_layers
+            rows2, rows3, rows5, cka = _probe_marigold_streaming(
+                pipe_c, pairs, device, 1, "C", n_images, target_layers,
+                mlp_tasks=mlp_task_set,
             )
             exp02_rows.extend(rows2)
             exp03_rows.extend(rows3)
+            exp05_rows.extend(rows5)
             all_feats["C"] = cka
 
     out02.mkdir(parents=True, exist_ok=True)
     out03.mkdir(parents=True, exist_ok=True)
+    out05.mkdir(parents=True, exist_ok=True)
 
     with (out02 / "probing_matrix.csv").open("w", newline="") as f:
         w = csv.writer(f)
@@ -415,6 +442,13 @@ def run_probing(
         w = csv.writer(f)
         w.writerow(["model", "timestep", "task", "metric_value", "best_layer"])
         w.writerows(exp03_rows)
+
+    if exp05_rows:
+        with (out05 / "mlp_probing.csv").open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["model", "layer", "task", "metric_value"])
+            w.writerows(exp05_rows)
+        print(f"exp05: wrote {len(exp05_rows)} MLP probe rows", flush=True)
 
     out04 = ROOT / "results" / "exp04"
     out04.mkdir(parents=True, exist_ok=True)
@@ -465,6 +499,13 @@ def main() -> None:
         action="store_true",
         help="Keep existing probe rows for models not in --models.",
     )
+    p.add_argument(
+        "--mlp-depth",
+        "--mlp_depth",
+        action="store_true",
+        dest="mlp_depth",
+        help="Also train MLP probes for depth (exp05) alongside linear probes.",
+    )
     args = p.parse_args()
 
     device = f"cuda:{args.gpu}"
@@ -483,6 +524,7 @@ def main() -> None:
         args.denoise_steps,
         models=args.models,
         append=args.append,
+        mlp_depth=args.mlp_depth,
     )
     set_status("complete", device=device, max_images=args.max_images)
 

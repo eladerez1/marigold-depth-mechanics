@@ -43,6 +43,7 @@ case "${ACR_JOB:-probing}" in
     LOG="${LOG_DIR}/spatial_probing_acr.log"
     PROBE_EXTRA=()
     [[ "${APPEND:-false}" == "true" ]] && PROBE_EXTRA+=(--append)
+    [[ "${MLP_DEPTH:-false}" == "true" ]] && PROBE_EXTRA+=(--mlp-depth)
     _run_python scripts/run_gpu_pipeline.py \
       --gpu 0 \
       --max_images "${MAX_IMAGES:-200}" \

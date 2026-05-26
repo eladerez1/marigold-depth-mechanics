@@ -1,4 +1,4 @@
-"""Train/evaluate per-pixel linear probes on frozen U-Net feature maps."""
+"""Train/evaluate per-pixel linear and MLP probes on frozen U-Net feature maps."""
 
 from __future__ import annotations
 
@@ -12,6 +12,21 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.probing.probe_tasks import TASK_SPECS
+
+
+def _build_probe(probe_type: str, input_dim: int, output_dim: int) -> nn.Module:
+    if probe_type == "linear":
+        return nn.Linear(input_dim, output_dim)
+    if probe_type == "mlp":
+        hidden = 256
+        return nn.Sequential(
+            nn.Linear(input_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, output_dim),
+        )
+    raise ValueError(f"Unknown probe_type: {probe_type!r}")
 
 
 def _align_feat_label(
@@ -58,7 +73,7 @@ def _compute_loss(pred: torch.Tensor, target: torch.Tensor, loss_type: str) -> t
 
 @torch.no_grad()
 def _eval_metric(
-    probe: nn.Linear,
+    probe: nn.Module,
     x: torch.Tensor,
     y: torch.Tensor,
     loss_type: str,
@@ -87,6 +102,7 @@ def train_spatial_probe(
     train_idx: list[int],
     val_idx: list[int],
     *,
+    probe_type: str = "linear",
     max_pixels_per_image: int = 4096,
     max_epochs: int = 25,
     batch_size: int = 2048,
@@ -122,7 +138,13 @@ def train_spatial_probe(
     if x_train.shape[0] < 64 or x_val.shape[0] < 32:
         return {"val_metric": 0.0, "skipped": 1.0}
 
-    probe = nn.Linear(x_train.shape[1], spec.output_dim).to(device)
+    # MLP probes benefit from more epochs and a lower LR.
+    if probe_type == "mlp":
+        max_epochs = max(max_epochs, 50)
+        lr = lr * 0.3
+        patience = max(patience, 10)
+
+    probe = _build_probe(probe_type, x_train.shape[1], spec.output_dim).to(device)
     opt = torch.optim.Adam(probe.parameters(), lr=lr)
     loader = DataLoader(
         TensorDataset(x_train.float(), y_train.float()),
@@ -170,12 +192,15 @@ def train_spatial_probes_for_model(
     *,
     layer_subsample: int = 12,
     tasks: tuple[str, ...] = ("ordinal", "depth", "boundary"),
-) -> tuple[list, list]:
+    mlp_tasks: tuple[str, ...] = (),
+) -> tuple[list, list, list]:
     """
     feats[layer][timestep] -> list of [C,H,W] per image.
 
-    Exp02 row: best metric over timesteps per (layer, task).
-    Exp03 row: best metric over layers per (timestep, task).
+    Returns (exp02_rows, exp03_rows, exp05_rows).
+    Exp02 row: best linear probe metric over timesteps per (layer, task).
+    Exp03 row: best linear probe metric over layers per (timestep, task).
+    Exp05 row: best MLP probe metric per (layer, task) — only for tasks in mlp_tasks.
     """
     layer_names = sorted(feats.keys())
     if len(layer_names) > layer_subsample:
@@ -190,27 +215,30 @@ def train_spatial_probes_for_model(
 
     exp02_rows: list = []
     exp03_rows: list = []
+    exp05_rows: list = []
     dev = torch.device(device)
     # Scale down pixel budget so 1000-image runs finish in reasonable time.
     max_pixels = min(4096, max(512, 500_000 // max(n_images, 1)))
 
-    for task_name in tasks:
+    all_tasks = tuple(dict.fromkeys(list(tasks) + list(mlp_tasks)))
+
+    for task_name in all_tasks:
         label_maps = labels_acc[task_name]
         if len(label_maps) != n_images:
             continue
 
-        # layer -> task -> t -> metric
+        run_linear = task_name in tasks
+        run_mlp = task_name in mlp_tasks
+
+        # layer -> t -> metric (linear)
         layer_task_t: dict[str, dict[int, float]] = {layer: {} for layer in layer_names}
         t_layer: dict[int, dict[str, float]] = {}
+        # layer -> best MLP metric
+        layer_mlp: dict[str, float] = {}
 
         t_items = sorted(feats[layer_names[0]].items(), key=lambda x: x[0])
         if len(t_items) > 5 and n_images > 300:
             t_items = [t_items[0], t_items[len(t_items) // 2], t_items[-1]]
-            print(
-                f"spatial-{model_id}-{task_name}: subsampled {len(t_items)} timesteps "
-                f"(n_images={n_images})",
-                flush=True,
-            )
 
         for layer in tqdm(layer_names, desc=f"spatial-{model_id}-{task_name}", leave=False):
             for t_int, feat_list in feats[layer].items():
@@ -218,34 +246,60 @@ def train_spatial_probes_for_model(
                     continue
                 if n_images > 300 and t_int not in {ti for ti, _ in t_items}:
                     continue
-                metrics = train_spatial_probe(
-                    feat_list,
-                    label_maps,
-                    task_name,
-                    train_idx,
-                    val_idx,
-                    max_pixels_per_image=max_pixels,
-                    device=dev,
-                    seed=hash((model_id, layer, t_int, task_name)) % (2**31),
-                )
-                if metrics.get("skipped"):
+
+                seed = hash((model_id, layer, t_int, task_name)) % (2**31)
+
+                if run_linear:
+                    metrics = train_spatial_probe(
+                        feat_list,
+                        label_maps,
+                        task_name,
+                        train_idx,
+                        val_idx,
+                        probe_type="linear",
+                        max_pixels_per_image=max_pixels,
+                        device=dev,
+                        seed=seed,
+                    )
+                    if not metrics.get("skipped"):
+                        score = metrics["val_metric"]
+                        layer_task_t[layer][t_int] = score
+                        t_layer.setdefault(t_int, {})[layer] = score
+
+                if run_mlp:
+                    mlp_metrics = train_spatial_probe(
+                        feat_list,
+                        label_maps,
+                        task_name,
+                        train_idx,
+                        val_idx,
+                        probe_type="mlp",
+                        max_pixels_per_image=max_pixels,
+                        device=dev,
+                        seed=seed,
+                    )
+                    if not mlp_metrics.get("skipped"):
+                        mlp_score = mlp_metrics["val_metric"]
+                        if layer not in layer_mlp or mlp_score > layer_mlp[layer]:
+                            layer_mlp[layer] = mlp_score
+
+        if run_linear:
+            for layer in layer_names:
+                if not layer_task_t[layer]:
                     continue
-                score = metrics["val_metric"]
-                layer_task_t[layer][t_int] = score
-                t_layer.setdefault(t_int, {})[layer] = score
+                best_t = max(layer_task_t[layer], key=layer_task_t[layer].get)
+                best_score = layer_task_t[layer][best_t]
+                exp02_rows.append([model_id, layer, task_name, f"{best_score:.4f}", int(best_t)])
 
-        for layer in layer_names:
-            if not layer_task_t[layer]:
-                continue
-            best_t = max(layer_task_t[layer], key=layer_task_t[layer].get)
-            best_score = layer_task_t[layer][best_t]
-            exp02_rows.append([model_id, layer, task_name, f"{best_score:.4f}", int(best_t)])
+            for t_int, lscores in t_layer.items():
+                if not lscores:
+                    continue
+                best_layer = max(lscores, key=lscores.get)
+                best_score = lscores[best_layer]
+                exp03_rows.append([model_id, t_int, task_name, f"{best_score:.4f}", best_layer])
 
-        for t_int, lscores in t_layer.items():
-            if not lscores:
-                continue
-            best_layer = max(lscores, key=lscores.get)
-            best_score = lscores[best_layer]
-            exp03_rows.append([model_id, t_int, task_name, f"{best_score:.4f}", best_layer])
+        if run_mlp:
+            for layer, mlp_score in layer_mlp.items():
+                exp05_rows.append([model_id, layer, task_name, f"{mlp_score:.4f}"])
 
-    return exp02_rows, exp03_rows
+    return exp02_rows, exp03_rows, exp05_rows
