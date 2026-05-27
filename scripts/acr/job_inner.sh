@@ -126,6 +126,16 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  precompute_pi3)
+    LOG="${LOG_DIR}/precompute_pi3_acr.log"
+    _run_python scripts/precompute_pi3_depth_maps.py \
+      --sessions_root "${PI3_SESSIONS_ROOT:-/isilon/Automotive/RnD/elad.e/uv-3d/sessions/pi3_benchmark}" \
+      --output_dir "${PROJ}/data/uveye_pi3_depth" \
+      --min_valid_frac 0.005 \
+      --workers "${WORKERS:-8}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
   train_uveye)
     LOG="${LOG_DIR}/train_uveye_acr.log"
     EXTRA_ARGS=()
