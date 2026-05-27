@@ -63,13 +63,21 @@ def _parse_calibration(calib_path: Path) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# PLY loader (minimal — only reads XYZ vertices)
+# PLY loader
 # ---------------------------------------------------------------------------
 
 def _load_ply_xyz(ply_path: Path) -> np.ndarray:
-    """Return (N, 3) float32 XYZ array from an ASCII or binary PLY."""
-    import struct
+    """Return (N, 3) float32 XYZ array. Uses plyfile if available (faster)."""
+    try:
+        from plyfile import PlyData
+        data = PlyData.read(str(ply_path))
+        v = data["vertex"]
+        return np.stack([v["x"], v["y"], v["z"]], axis=-1).astype(np.float32)
+    except ImportError:
+        pass
 
+    # Fallback: minimal binary/ASCII PLY reader
+    import struct
     with open(ply_path, "rb") as f:
         header_lines: list[bytes] = []
         while True:
@@ -77,18 +85,14 @@ def _load_ply_xyz(ply_path: Path) -> np.ndarray:
             header_lines.append(line)
             if line.strip() == b"end_header":
                 break
-
         header = b"".join(header_lines).decode("utf-8", errors="replace")
         n_vertex = 0
         for ln in header.splitlines():
             if ln.startswith("element vertex"):
                 n_vertex = int(ln.split()[-1])
                 break
-
         is_binary_le = "format binary_little_endian" in header
         is_binary_be = "format binary_big_endian" in header
-
-        # Count float/double properties to know stride
         props = []
         in_vertex = False
         for ln in header.splitlines():
@@ -97,27 +101,23 @@ def _load_ply_xyz(ply_path: Path) -> np.ndarray:
             elif ln.startswith("element") and in_vertex:
                 break
             elif in_vertex and ln.startswith("property"):
-                parts = ln.split()
-                props.append(parts[1])  # type name
-
+                props.append(ln.split()[1])
         if is_binary_le or is_binary_be:
-            fmt_char = "<" if is_binary_le else ">"
-            type_map = {"float": "f", "float32": "f", "double": "d",
-                        "float64": "d", "int": "i", "uint": "I",
-                        "uchar": "B", "short": "h"}
-            fmt = fmt_char + "".join(type_map.get(p, "f") for p in props)
-            stride = struct.calcsize(fmt)
-            raw = f.read(n_vertex * stride)
-            pts = np.frombuffer(raw, dtype=np.dtype(fmt.replace("<", "").replace(">", "")))
-            pts = pts.reshape(n_vertex, -1)
-            xyz = pts[:, :3].astype(np.float32)
+            endian = "<" if is_binary_le else ">"
+            type_map = {
+                "float": "f4", "float32": "f4", "double": "f8", "float64": "f8",
+                "int": "i4", "int32": "i4", "uint": "u4", "uint32": "u4",
+                "short": "i2", "ushort": "u2", "uchar": "u1", "uint8": "u1",
+                "char": "i1",
+            }
+            dt = np.dtype([(f"f{i}", endian + type_map.get(p, "f4")) for i, p in enumerate(props)])
+            raw = f.read(n_vertex * dt.itemsize)
+            pts = np.frombuffer(raw, dtype=dt)
+            return np.stack([pts["f0"], pts["f1"], pts["f2"]], axis=-1).astype(np.float32)
         else:
-            # ASCII
             lines = f.read().decode("utf-8", errors="replace").splitlines()
             rows = [list(map(float, ln.split()[:3])) for ln in lines[:n_vertex] if ln.strip()]
-            xyz = np.array(rows, dtype=np.float32)
-
-    return xyz
+            return np.array(rows, dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -253,54 +253,73 @@ class UVeyePi3Dataset(Dataset):
     """
     Torch Dataset over UVeye Pi3 inspection sessions.
 
+    Two modes:
+    1. **Precomputed** (fast, recommended for training): pass ``index_json`` pointing
+       to a JSON file produced by ``scripts/precompute_pi3_depth_maps.py``.
+       Depth maps are loaded from pre-saved NPY files — no PLY/projection overhead.
+
+    2. **On-the-fly** (slow, only for development/sanity checks): pass
+       ``sessions_root`` and depth maps are projected from PLY files at load time.
+
     Args:
-        sessions_root: Path to the root containing per-session directories,
-                       e.g. /isilon/Automotive/RnD/elad.e/uv-3d/sessions/pi3_benchmark
-        image_size: (H, W) to resize RGB and depth maps to. Default (480, 640).
-        min_valid_frac: Minimum fraction of image pixels that must have valid depth
-                        for a sample to be included. Default 0.01 (1%).
-        max_samples: Cap on total samples (useful for debugging).
+        index_json:      Path to precomputed index.json (fast path).
+        sessions_root:   Pi3 sessions root dir (on-the-fly path, ignored if index_json given).
+        image_size:      (H, W) to resize inputs to. Default (480, 640).
+        min_valid_frac:  Minimum fraction of valid-depth pixels. Default 0.01.
+        max_samples:     Cap on total samples (for debugging).
     """
 
     SESSIONS_ROOT = Path(
         "/isilon/Automotive/RnD/elad.e/uv-3d/sessions/pi3_benchmark"
     )
+    DEFAULT_INDEX = Path(
+        "/isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics"
+        "/data/uveye_pi3_depth/index.json"
+    )
 
     def __init__(
         self,
+        index_json: Optional[Path] = None,
         sessions_root: Optional[Path] = None,
         image_size: tuple[int, int] = (480, 640),
         min_valid_frac: float = 0.01,
         max_samples: Optional[int] = None,
     ):
-        self.sessions_root = Path(sessions_root or self.SESSIONS_ROOT)
         self.image_size = image_size  # (H, W)
         self.min_valid_frac = min_valid_frac
+        self._precomputed = False
 
-        raw_samples = _discover_samples(self.sessions_root)
+        idx_path = index_json or (self.DEFAULT_INDEX if self.DEFAULT_INDEX.exists() else None)
 
-        # Load and cache calibrations (one per calib_path)
-        self._calib_cache: dict[str, dict] = {}
-        for s in raw_samples:
-            key = str(s["calib_path"])
-            if key not in self._calib_cache:
-                try:
-                    self._calib_cache[key] = _parse_calibration(s["calib_path"])
-                except Exception as e:
-                    log.warning("Cannot parse calibration %s: %s", s["calib_path"], e)
+        if idx_path is not None and Path(idx_path).exists():
+            import json
+            with open(idx_path) as f:
+                raw = json.load(f)
+            self.samples = [s for s in raw if s.get("valid_frac", 1.0) >= min_valid_frac]
+            self._precomputed = True
+            log.info("UVeyePi3Dataset (precomputed): %d samples from %s", len(self.samples), idx_path)
+        else:
+            log.info("No precomputed index found — using on-the-fly projection (slow)")
+            self.sessions_root = Path(sessions_root or self.SESSIONS_ROOT)
+            raw_samples = _discover_samples(self.sessions_root)
 
-        # Filter to samples whose calibration loaded and cam_name is in it
-        self.samples = []
-        for s in raw_samples:
-            key = str(s["calib_path"])
-            calib = self._calib_cache.get(key, {})
-            if s["cam"] in calib:
-                self.samples.append(s)
+            self._calib_cache: dict[str, dict] = {}
+            for s in raw_samples:
+                key = str(s["calib_path"])
+                if key not in self._calib_cache:
+                    try:
+                        self._calib_cache[key] = _parse_calibration(s["calib_path"])
+                    except Exception as e:
+                        log.warning("Cannot parse calibration %s: %s", s["calib_path"], e)
+
+            self.samples = [
+                s for s in raw_samples
+                if s["cam"] in self._calib_cache.get(str(s["calib_path"]), {})
+            ]
+            log.info("UVeyePi3Dataset (on-the-fly): %d samples", len(self.samples))
 
         if max_samples is not None:
             self.samples = self.samples[:max_samples]
-
-        log.info("UVeyePi3Dataset: %d samples (after calib filter)", len(self.samples))
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -309,48 +328,51 @@ class UVeyePi3Dataset(Dataset):
         s = self.samples[idx]
         H, W = self.image_size
 
-        # --- RGB ---
+        if self._precomputed:
+            return self._getitem_precomputed(s, H, W)
+        else:
+            return self._getitem_live(s, H, W)
+
+    def _getitem_precomputed(self, s: dict, H: int, W: int) -> dict:
+        img_bgr = cv2.imread(s["rgb"])
+        if img_bgr is None:
+            raise FileNotFoundError(f"Image not found: {s['rgb']}")
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.resize(img_rgb, (W, H), interpolation=cv2.INTER_AREA)
+        rgb = torch.from_numpy(img_rgb).permute(2, 0, 1).float() / 255.0
+
+        depth_full = np.load(s["depth"])
+        depth_resized = cv2.resize(depth_full, (W, H), interpolation=cv2.INTER_NEAREST)
+        depth = torch.from_numpy(depth_resized).unsqueeze(0)
+        mask = depth > 0
+
+        return {
+            "rgb": rgb, "depth": depth, "mask": mask,
+            "session": s["session"], "cam": s["cam"], "frame": s["frame"],
+            "valid_frac": s.get("valid_frac", mask.float().mean().item()),
+        }
+
+    def _getitem_live(self, s: dict, H: int, W: int) -> dict:
         img_bgr = cv2.imread(str(s["img_path"]))
         if img_bgr is None:
             raise FileNotFoundError(f"Image not found: {s['img_path']}")
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_rgb = cv2.resize(img_rgb, (W, H), interpolation=cv2.INTER_AREA)
-        rgb = torch.from_numpy(img_rgb).permute(2, 0, 1).float() / 255.0  # [3,H,W]
+        rgb = torch.from_numpy(img_rgb).permute(2, 0, 1).float() / 255.0
 
-        # --- Calibration ---
         calib = self._calib_cache[str(s["calib_path"])][s["cam"]]
-        K_orig = calib["K"].copy()
-        W_orig, H_orig = calib["W"], calib["H"]
-        dist = calib["dist"]
-
-        # Scale intrinsics to resized resolution
-        K_scaled = K_orig.copy()
-        K_scaled[0] *= W / W_orig   # fx, cx
-        K_scaled[1] *= H / H_orig   # fy, cy
-
-        # --- Point cloud ---
         xyz = _load_ply_xyz(s["ply_path"])
-
-        # --- Depth map (full-res then resize) ---
         depth_full = _project_to_depth(
-            xyz, s["pose_w2c"], K_orig, dist, W_orig, H_orig
+            xyz, s["pose_w2c"], calib["K"], calib["dist"], calib["W"], calib["H"]
         )
-        # Resize with nearest to avoid interpolating depth across object edges
         depth_resized = cv2.resize(depth_full, (W, H), interpolation=cv2.INTER_NEAREST)
-        depth = torch.from_numpy(depth_resized).unsqueeze(0)  # [1,H,W]
-        mask = (depth > 0)  # [1,H,W]
+        depth = torch.from_numpy(depth_resized).unsqueeze(0)
+        mask = depth > 0
 
         valid_frac = mask.float().mean().item()
-        if valid_frac < self.min_valid_frac:
-            log.debug("Sample %d has low coverage (%.3f) — will be used anyway", idx, valid_frac)
-
         return {
-            "rgb": rgb,
-            "depth": depth,
-            "mask": mask,
-            "session": s["session"],
-            "cam": s["cam"],
-            "frame": s["frame"],
+            "rgb": rgb, "depth": depth, "mask": mask,
+            "session": s["session"], "cam": s["cam"], "frame": s["frame"],
             "valid_frac": valid_frac,
         }
 
