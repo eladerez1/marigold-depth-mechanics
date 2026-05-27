@@ -5,7 +5,8 @@ set -euo pipefail
 PROJ="${MARIGOLD_PROJ:-/workspace}"
 ISILON_ROOT="${MARIGOLD_ISILON_ROOT:-/isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics}"
 export HF_HOME="${HF_HOME:-/isilon/Automotive/RnD/elad.e/.cache/huggingface}"
-export PYTHONPATH="${PROJ}/third_party/Marigold:${PROJ}:${PYTHONPATH:-}"
+# Isilon root first so latest src/ is always found, even if Docker image is stale.
+export PYTHONPATH="${ISILON_ROOT}:${PROJ}/third_party/Marigold:${PROJ}:${PYTHONPATH:-}"
 
 cd "${PROJ}"
 
