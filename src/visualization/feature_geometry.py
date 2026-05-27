@@ -111,6 +111,8 @@ def run_feature_geometry(
     pipe.encode_empty_text()
     gen_rng = torch.Generator(device=device)
 
+    from src.extraction.sd2_probing_forward import extract_sd2_one_layer
+
     for mid in ["A", "B", "C", "D"]:
         layer = best_layers.get(mid)
         if layer is None:
@@ -118,64 +120,61 @@ def run_feature_geometry(
             continue
         print(f"\nModel {mid}: extracting layer {layer}", flush=True)
 
+        feats_all = []
+        depths_all = []
+
         if mid == "A":
+            # Model A is 4-channel vanilla SD2 — use the SD2-specific extractor
             ckpt_a = root / "checkpoints" / "model_A_sd2"
             if not (ckpt_a / "unet" / "config.json").exists():
                 print("  Model A UNet missing — skip")
                 continue
-            unet = UNet2DConditionModel.from_pretrained(
+            sd2_unet = UNet2DConditionModel.from_pretrained(
                 ckpt_a, subfolder="unet", torch_dtype=torch.float16
             ).to(device)
-            working_pipe = pipe
-            working_pipe.unet = unet
-            n_steps = 10
-        elif mid == "B":
+            layer_data = extract_sd2_one_layer(
+                sd2_unet, pipe, pairs,
+                load_rgb_tensor, load_depth_tensor,
+                layer, n_steps=10, device=device, n_images=len(pairs),
+            )
+            del sd2_unet
+        else:
+            n_steps = 10 if mid == "B" else 1
             working_pipe = _load_marigold_pipe(device)
+            if mid == "C":
+                working_pipe.unet = UNet2DConditionModel.from_pretrained(
+                    model_c_dir(root / "checkpoints"),
+                    subfolder="unet",
+                    torch_dtype=torch.float16,
+                ).to(device)
             working_pipe.encode_empty_text()
-            n_steps = 10
-        elif mid == "C":
-            working_pipe = _load_marigold_pipe(device)
-            working_pipe.unet = UNet2DConditionModel.from_pretrained(
-                model_c_dir(root / "checkpoints"),
-                subfolder="unet",
-                torch_dtype=torch.float16,
-            ).to(device)
-            working_pipe.encode_empty_text()
-            n_steps = 1
-        elif mid == "D":
-            working_pipe = _load_marigold_pipe(device)
-            working_pipe.encode_empty_text()
-            n_steps = 1
+            layer_data = _extract_marigold_one_layer(
+                working_pipe, pairs, device, n_steps, layer,
+                desc=f"extract-{mid}",
+            )
+            del working_pipe
 
-        feats_all = []
-        depths_all = []
-
-        layer_data = _extract_marigold_one_layer(
-            working_pipe, pairs, device, n_steps, layer,
-            desc=f"extract-{mid}",
-        )
         layer_feats = layer_data.get(layer, {})
         ts = sorted(layer_feats.keys())
         if not ts:
             print(f"  No features extracted for layer {layer}")
+            torch.cuda.empty_cache()
             continue
         rep_t = ts[len(ts) // 2]
         feat_list = layer_feats[rep_t]  # list of [C,H,W] tensors, one per image
 
-        for i, (feat_tensor, (_, depth_path)) in enumerate(zip(feat_list, pairs)):
+        for feat_tensor, (_, depth_path) in zip(feat_list, pairs):
             depth = load_depth_tensor(depth_path, size=feat_tensor.shape[1])
             x, d = _sample_pixels(feat_tensor, depth, pixels_per_image, rng)
             feats_all.append(x)
             depths_all.append(d)
 
+        torch.cuda.empty_cache()
+
         X = np.concatenate(feats_all, axis=0)
         D = np.concatenate(depths_all, axis=0)
         print(f"  {X.shape[0]} pixel samples, {X.shape[1]} dims")
         all_data[mid] = (X, D)
-
-        # Free GPU memory
-        del working_pipe
-        torch.cuda.empty_cache()
 
     if not all_data:
         print("No data collected")
