@@ -100,7 +100,7 @@ case "${JOB_CMD}" in
     [[ -n "${JOB_ID:-}" ]] || { echo "Pass --job-id"; exit 1; }
     exec acr logs "${JOB_ID}" -f
     ;;
-  probing|full|export_denoise|train_model_c|train_model_e|geometry|finish)
+  probing|full|export_denoise|train_model_c|train_model_e|geometry|depth_vis|finish)
     JOB="${JOB_CMD}"
     ;;
   *)

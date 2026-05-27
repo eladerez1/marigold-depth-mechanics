@@ -117,6 +117,15 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  depth_vis)
+    LOG="${LOG_DIR}/depth_vis_acr.log"
+    _run_python scripts/make_depth_comparison.py \
+      --gpu 0 \
+      --n_images "${NYU_INDEX:-4}" \
+      --n_steps "${DENOISE_STEPS:-10}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
   finish)
     LOG="${LOG_DIR}/finish_acr.log"
     {
