@@ -40,7 +40,20 @@ sys.path.insert(0, str(MARIGOLD_ROOT))
 from marigold import MarigoldDepthPipeline  # noqa: E402
 from diffusers import DDIMScheduler        # noqa: E402
 
-from src.dataset.uveye_pi3_dataset import UVeyePi3Dataset  # noqa: E402
+# Load dataset module directly from Isilon to work around stale Docker image.
+# The standard import is attempted first; if it fails we fall back to the
+# known absolute path on the shared filesystem.
+try:
+    from src.dataset.uveye_pi3_dataset import UVeyePi3Dataset  # noqa: E402
+except ModuleNotFoundError:
+    import importlib.util as _ilu
+    _ds_path = Path("/isilon/Automotive/RnD/elad.e/Dev/research/marigold_depth_mechanics"
+                    "/src/dataset/uveye_pi3_dataset.py")
+    _spec = _ilu.spec_from_file_location("uveye_pi3_dataset", _ds_path)
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    UVeyePi3Dataset = _mod.UVeyePi3Dataset
+    log.info("Loaded UVeyePi3Dataset from Isilon fallback path")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
