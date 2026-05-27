@@ -126,6 +126,20 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  train_uveye)
+    LOG="${LOG_DIR}/train_uveye_acr.log"
+    EXTRA_ARGS=()
+    [[ "${FREEZE_ENCODER:-false}" == "true" ]] && EXTRA_ARGS+=(--freeze_encoder)
+    _run_python scripts/train_marigold_uveye.py \
+      --output_dir "${PROJ}/results/model_uveye" \
+      --steps "${TRAIN_STEPS:-3000}" \
+      --batch_size "${BATCH_SIZE:-2}" \
+      --grad_accum 4 \
+      --num_workers 4 \
+      "${EXTRA_ARGS[@]}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
   finish)
     LOG="${LOG_DIR}/finish_acr.log"
     {
@@ -155,7 +169,7 @@ case "${ACR_JOB:-probing}" in
     ;;
 
   *)
-    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c | finish)" >&2
+    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c | train_model_e | geometry | depth_vis | train_uveye | finish)" >&2
     exit 1
     ;;
 esac
