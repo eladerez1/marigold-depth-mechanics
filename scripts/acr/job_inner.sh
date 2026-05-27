@@ -22,6 +22,14 @@ _link_isilon() {
   mkdir -p "${ISILON_ROOT}/results"
   rm -rf "${PROJ}/results" 2>/dev/null || true
   ln -sfn "${ISILON_ROOT}/results" "${PROJ}/results"
+
+  # Sync src/ and scripts/ from Isilon so the latest code is always available,
+  # even when the Docker image was built from a stale cached layer.
+  for name in src scripts; do
+    if [[ -d "${ISILON_ROOT}/${name}" ]]; then
+      cp -a "${ISILON_ROOT}/${name}/." "${PROJ}/${name}/"
+    fi
+  done
 }
 _link_isilon
 
