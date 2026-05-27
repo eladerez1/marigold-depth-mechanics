@@ -53,7 +53,7 @@ except ModuleNotFoundError:
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     UVeyePi3Dataset = _mod.UVeyePi3Dataset
-    log.info("Loaded UVeyePi3Dataset from Isilon fallback path")
+    print("INFO: Loaded UVeyePi3Dataset from Isilon fallback path")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
