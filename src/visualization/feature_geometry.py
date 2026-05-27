@@ -135,7 +135,7 @@ def run_feature_geometry(
             layer_data = extract_sd2_one_layer(
                 sd2_unet, pipe, pairs,
                 load_rgb_tensor, load_depth_tensor,
-                layer, n_steps=10, device=device, n_images=len(pairs),
+                layer, n_steps=10, device=device, max_images=len(pairs),
             )
             del sd2_unet
         else:
