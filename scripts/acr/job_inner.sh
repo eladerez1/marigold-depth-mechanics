@@ -150,6 +150,22 @@ case "${ACR_JOB:-probing}" in
       2>&1 | tee "${LOG}"
     ;;
 
+  train_3drealcar)
+    LOG="${LOG_DIR}/train_3drealcar_acr.log"
+    EXTRA_ARGS=()
+    [[ "${FREEZE_ENCODER:-false}" == "true" ]] && EXTRA_ARGS+=(--freeze_encoder)
+    _run_python scripts/train_marigold_3drealcar.py \
+      --data_root "${DATA_ROOT:-/workspace/data/3drealcar}" \
+      --output_dir "${PROJ}/results/model_3drealcar" \
+      --lighting "${LIGHTING:-standard}" \
+      --steps "${TRAIN_STEPS:-5000}" \
+      --batch_size "${BATCH_SIZE:-2}" \
+      --grad_accum 4 \
+      --num_workers 4 \
+      "${EXTRA_ARGS[@]}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
   finish)
     LOG="${LOG_DIR}/finish_acr.log"
     {
@@ -179,7 +195,7 @@ case "${ACR_JOB:-probing}" in
     ;;
 
   *)
-    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c | train_model_e | geometry | depth_vis | train_uveye | finish)" >&2
+    echo "Unknown ACR_JOB=${ACR_JOB} (probing | full | export_denoise | train_model_c | train_model_e | geometry | depth_vis | train_uveye | train_3drealcar | finish)" >&2
     exit 1
     ;;
 esac
