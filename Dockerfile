@@ -16,9 +16,9 @@ RUN python3 -m pip install --no-cache-dir \
 COPY scripts/acr/requirements-docker.txt /tmp/requirements-docker.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements-docker.txt
 
+# Bump this value to force Docker cache invalidation of COPY and later steps.
+ARG CACHE_BUST=20260527
 COPY . /workspace
-# Bump when forcing ACR image rebuild (train Model C pipeline loader fixes).
-ARG CACHE_BUST=20260521
 WORKDIR /workspace
 
 # ACR build context often omits submodule contents; fetch Marigold if missing.
