@@ -39,6 +39,8 @@ _ckpt_paths = _load_module_from_path(
 )
 model_c_dir = _ckpt_paths.model_c_dir
 model_c_ready = _ckpt_paths.model_c_ready
+model_e_dir = _ckpt_paths.model_e_dir
+model_e_ready = _ckpt_paths.model_e_ready
 
 # Project root first for probing code; Marigold for pipeline.
 sys.path.insert(0, str(MARIGOLD_ROOT))
@@ -339,6 +341,9 @@ def run_probing(
     if "C" in model_list and not model_c_ready(ROOT / "checkpoints"):
         print("Model C not trained — skipping C (see src/models/train_single_step.py)")
         model_list = [m for m in model_list if m != "C"]
+    if "E" in model_list and not model_e_ready(ROOT / "checkpoints"):
+        print("Model E not trained — skipping E (run train_model_e job first)")
+        model_list = [m for m in model_list if m != "E"]
 
     pipe = _load_marigold_pipe(device)
     pipe.encode_empty_text()
@@ -413,21 +418,22 @@ def run_probing(
                 del feats
             del sd2_unet
             torch.cuda.empty_cache()
-        elif mid == "C":
-            pipe_c = _load_marigold_pipe(device)
-            pipe_c.unet = UNet2DConditionModel.from_pretrained(
-                model_c_dir(ROOT / "checkpoints"),
+        elif mid in ("C", "E"):
+            ckpt_fn = model_c_dir if mid == "C" else model_e_dir
+            pipe_x = _load_marigold_pipe(device)
+            pipe_x.unet = UNet2DConditionModel.from_pretrained(
+                ckpt_fn(ROOT / "checkpoints"),
                 subfolder="unet",
                 torch_dtype=torch.float16,
             ).to(device)
             rows2, rows3, rows5, cka = _probe_marigold_streaming(
-                pipe_c, pairs, device, 1, "C", n_images, target_layers,
+                pipe_x, pairs, device, 1, mid, n_images, target_layers,
                 mlp_tasks=mlp_task_set,
             )
             exp02_rows.extend(rows2)
             exp03_rows.extend(rows3)
             exp05_rows.extend(rows5)
-            all_feats["C"] = cka
+            all_feats[mid] = cka
 
     out02.mkdir(parents=True, exist_ok=True)
     out03.mkdir(parents=True, exist_ok=True)
@@ -480,6 +486,14 @@ def run_probing(
     torch.cuda.empty_cache()
 
 
+def run_geometry(device: str, max_images: int = 200) -> None:
+    """Exp06: PCA/UMAP feature geometry at best depth-predictive layer per model."""
+    from src.visualization.feature_geometry import run_feature_geometry
+    set_status("geometry")
+    run_feature_geometry(device=device, root=ROOT, max_images=max_images)
+    set_status("geometry_done")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", type=int, default=0)
@@ -506,6 +520,13 @@ def main() -> None:
         dest="mlp_depth",
         help="Also train MLP probes for depth (exp05) alongside linear probes.",
     )
+    p.add_argument(
+        "--geometry-only",
+        "--geometry_only",
+        action="store_true",
+        dest="geometry_only",
+        help="Skip probing; only run feature geometry (PCA/UMAP) job.",
+    )
     args = p.parse_args()
 
     device = f"cuda:{args.gpu}"
@@ -514,18 +535,21 @@ def main() -> None:
     np.random.seed(42)
 
     set_status("starting", device=device, max_images=args.max_images)
-    if not args.skip_download:
-        download_models()
-    if not args.probing_only:
-        run_exp01()
-    run_probing(
-        device,
-        args.max_images,
-        args.denoise_steps,
-        models=args.models,
-        append=args.append,
-        mlp_depth=args.mlp_depth,
-    )
+    if args.geometry_only:
+        run_geometry(device, max_images=args.max_images)
+    else:
+        if not args.skip_download:
+            download_models()
+        if not args.probing_only:
+            run_exp01()
+        run_probing(
+            device,
+            args.max_images,
+            args.denoise_steps,
+            models=args.models,
+            append=args.append,
+            mlp_depth=args.mlp_depth,
+        )
     set_status("complete", device=device, max_images=args.max_images)
 
 

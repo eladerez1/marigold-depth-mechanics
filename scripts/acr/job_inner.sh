@@ -84,10 +84,36 @@ case "${ACR_JOB:-probing}" in
     _run_python src/models/train_single_step.py \
       --output_dir "${PROJ}/results/model_C" \
       --train_data "${TRAIN_DATA:-nyu}" \
-      --steps "${TRAIN_STEPS:-30000}" \
+      --steps "${TRAIN_STEPS:-5000}" \
       --batch_size 2 \
       --grad_accum 4 \
       "${EXTRA_ARGS[@]}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
+  train_model_e)
+    LOG="${LOG_DIR}/train_model_e_acr.log"
+    EXTRA_ARGS=(--no_wandb --freeze_encoder)
+    if [[ -n "${MARIGOLD_BASE_DATA_DIR:-}" ]]; then
+      EXTRA_ARGS+=(--data_root "${MARIGOLD_BASE_DATA_DIR}")
+    fi
+    _run_python src/models/train_single_step.py \
+      --output_dir "${PROJ}/results/model_E" \
+      --train_data "${TRAIN_DATA:-nyu}" \
+      --steps "${TRAIN_STEPS:-5000}" \
+      --batch_size 2 \
+      --grad_accum 4 \
+      "${EXTRA_ARGS[@]}" \
+      2>&1 | tee "${LOG}"
+    ;;
+
+  geometry)
+    LOG="${LOG_DIR}/geometry_acr.log"
+    _run_python scripts/run_gpu_pipeline.py \
+      --gpu 0 \
+      --max_images "${MAX_IMAGES:-200}" \
+      --skip-download \
+      --geometry-only \
       2>&1 | tee "${LOG}"
     ;;
 

@@ -39,3 +39,33 @@ def model_c_dir(checkpoint_root: Path | str | None = None) -> Path:
 def model_c_ready(checkpoint_root: Path | str | None = None) -> bool:
     p = model_c_dir(checkpoint_root)
     return (p / "unet" / "config.json").exists()
+
+
+def model_e_dir(checkpoint_root: Path | str | None = None) -> Path:
+    """Model E: decoder-only fine-tuned variant of Model C."""
+    root = Path(checkpoint_root) if checkpoint_root else project_root() / "checkpoints"
+    proj = project_root()
+    candidates = [
+        proj / "results" / "model_E",
+        root / "model_E",
+        proj / "checkpoints" / "model_E",
+    ]
+    isilon = os.environ.get("MARIGOLD_ISILON_ROOT")
+    if isilon:
+        base = Path(isilon)
+        candidates = [
+            base / "results" / "model_E",
+            base / "checkpoints" / "model_E",
+            *candidates,
+        ]
+    for path in candidates:
+        if (path / "unet" / "config.json").exists():
+            return path
+    if isilon:
+        return Path(isilon) / "results" / "model_E"
+    return proj / "checkpoints" / "model_E"
+
+
+def model_e_ready(checkpoint_root: Path | str | None = None) -> bool:
+    p = model_e_dir(checkpoint_root)
+    return (p / "unet" / "config.json").exists()

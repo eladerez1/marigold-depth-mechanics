@@ -96,6 +96,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no_wandb", action="store_true")
     p.add_argument("--wandb_project", type=str, default="marigold-internals")
     p.add_argument("--wandb_run", type=str, default="model-C-single-step")
+    p.add_argument(
+        "--freeze_encoder",
+        action="store_true",
+        help=(
+            "Freeze all down_blocks, mid_block, and conv_in; train only up_blocks + conv_out. "
+            "Used for Model E (decoder-only fine-tuning hypothesis test)."
+        ),
+    )
     return p.parse_args()
 
 
@@ -180,6 +188,28 @@ def build_pipeline(device: torch.device) -> MarigoldDepthPipeline:
     # Re-encode empty text so the embedding dtype matches the fp32 UNet.
     pipe.encode_empty_text()
     return pipe
+
+
+def freeze_encoder(pipe: MarigoldDepthPipeline) -> None:
+    """Freeze all encoder (down_blocks, mid_block, conv_in) parameters.
+
+    Leaves up_blocks and conv_out trainable.  Used for Model E to test whether
+    depth fine-tuning is purely a decoder-readout problem.
+    """
+    frozen_prefixes = ("down_blocks", "mid_block", "conv_in")
+    n_frozen = n_trainable = 0
+    for name, param in pipe.unet.named_parameters():
+        if any(name.startswith(p) for p in frozen_prefixes):
+            param.requires_grad_(False)
+            n_frozen += param.numel()
+        else:
+            param.requires_grad_(True)
+            n_trainable += param.numel()
+    logging.info(
+        "Encoder frozen: %dM params frozen, %dM trainable (decoder only)",
+        n_frozen // 1_000_000,
+        n_trainable // 1_000_000,
+    )
 
 
 def build_train_loader(
@@ -331,6 +361,9 @@ def main() -> None:
         train_key = "hypersim,vkitti"
 
     pipe = build_pipeline(device)
+    if args.freeze_encoder:
+        freeze_encoder(pipe)
+        logging.info("Model E mode: encoder frozen, training decoder only")
     loader = build_train_loader(
         train_key,
         data_root,
