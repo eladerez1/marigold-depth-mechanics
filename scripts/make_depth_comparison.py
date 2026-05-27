@@ -114,6 +114,20 @@ def main():
     from src.models.checkpoint_paths import model_c_dir
     from src.models.marigold_pipe_loader import load_marigold_depth_pipeline
     from diffusers import UNet2DConditionModel
+    from torch.nn import Conv2d
+    from torch.nn.parameter import Parameter
+
+    def _adapt_unet_8ch(pipe):
+        """Expand 4-ch conv_in to 8-ch by duplicating weights (halved scale)."""
+        if pipe.unet.config.in_channels == 8:
+            return
+        w = pipe.unet.conv_in.weight.clone().repeat(1, 2, 1, 1) * 0.5
+        b = pipe.unet.conv_in.bias.clone()
+        new_in = Conv2d(8, pipe.unet.conv_in.out_channels, kernel_size=3, padding=1)
+        new_in.weight = Parameter(w)
+        new_in.bias = Parameter(b)
+        pipe.unet.conv_in = new_in
+        pipe.unet.config["in_channels"] = 8
 
     ckpt_b = ROOT / "checkpoints" / "model_B_marigold"
     ckpt_a_unet = ROOT / "checkpoints" / "model_A_sd2" / "unet"
@@ -135,10 +149,7 @@ def main():
         pipe_a.unet = UNet2DConditionModel.from_pretrained(
             ckpt_a_unet.parent, subfolder="unet", torch_dtype=torch.float16
         ).to(device)
-        # Expand conv_in to 8-ch if needed
-        if pipe_a.unet.config.in_channels != 8:
-            from src.models.train_single_step import adapt_unet_8ch
-            adapt_unet_8ch(pipe_a)
+        _adapt_unet_8ch(pipe_a)
     else:
         print("  Model A UNet not found — using placeholder", flush=True)
 
