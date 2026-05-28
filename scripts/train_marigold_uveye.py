@@ -203,6 +203,9 @@ def train(args: argparse.Namespace) -> None:
     opt = AdamW(params, lr=args.lr, weight_decay=1e-4)
     scheduler = LambdaLR(opt, lr_lambda=lambda s: _lr_lambda(s, args.warmup_steps, args.steps))
 
+    # --- Scheduler timesteps (required before calling scheduler.step()) ---
+    pipe.scheduler.set_timesteps(1000)
+
     # --- Empty text embedding (Marigold uses empty prompt) ---
     pipe.encode_empty_text()
     empty_embed = pipe.empty_text_embed.to(device)  # [1, 77, 1024]
